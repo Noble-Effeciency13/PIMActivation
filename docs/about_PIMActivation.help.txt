@@ -1,0 +1,82 @@
+TOPIC
+    about_PIMActivation
+
+SHORT DESCRIPTION
+    PowerShell module for managing Privileged Identity Management (PIM) role
+    activations through a graphical interface.
+
+LONG DESCRIPTION
+    The PIMActivation module provides a modern Windows Forms-based interface
+    for activating eligible PIM roles in Microsoft Entra ID (formerly Azure AD)
+    and PIM-enabled groups. It simplifies the process of discovering and
+    activating multiple roles simultaneously while respecting policy requirements.
+
+    Key Features:
+    - Graphical user interface for easy role management
+    - Support for Entra ID directory roles
+    - Support for PIM-enabled security groups
+    - Optional support for Azure resource roles
+    - Multi-select capability for bulk activations
+    - Configurable activation duration (1-24 hours)
+    - Automatic handling of policy requirements:
+      * Multi-factor authentication (MFA)
+      * Justification text
+      * Ticket information
+      * Authentication context
+      * Approval workflows
+    - Real-time view of active and eligible roles
+    - Account switching without restarting
+
+EXAMPLES
+    # Launch with default settings (Entra roles and Groups)
+    Start-PIMActivation
+
+    # Include only Entra ID roles
+    Start-PIMActivation -IncludeEntraRoles
+
+    # Include only PIM-enabled groups
+    Start-PIMActivation -IncludeGroups
+
+    # Include all role types including Azure resources
+    Start-PIMActivation -IncludeEntraRoles -IncludeGroups -IncludeAzureResources
+
+REQUIREMENTS
+    - PowerShell 7+ (Download from https://aka.ms/powershell)
+    - Windows operating system (for Windows Forms support)
+    - Microsoft.Graph PowerShell modules
+    - Appropriate permissions in Entra ID
+    - Az.Accounts module (optional, for Azure resource roles)
+
+INSTALLATION
+    Install-Module -Name PIMActivation -Scope CurrentUser
+
+TROUBLESHOOTING
+    Common Issues:
+
+    1. "Failed to authenticate"
+       - Ensure you have the required permissions
+       - Check if Microsoft.Graph modules are installed
+       - Verify network connectivity
+
+    2. "No eligible roles found"
+       - Verify you have PIM-eligible role assignments
+       - Check if the correct role types are enabled
+       - Ensure PIM is enabled in your tenant
+
+    3. "Az.Accounts module not found"
+       - This is only required for Azure resource roles
+       - Install with: Install-Module -Name Az.Accounts
+
+KEYWORDS
+    PIM
+    Privileged Identity Management
+    Entra ID
+    Azure AD
+    Role Activation
+    RBAC
+    Identity Governance
+
+SEE ALSO
+    Start-PIMActivation
+    https://github.com/Noble-Effeciency13/PIMActivation
+    https://docs.microsoft.com/azure/active-directory/privileged-identity-management/
