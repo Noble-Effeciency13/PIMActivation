@@ -2,7 +2,7 @@
 
 [![PowerShell Gallery](https://img.shields.io/powershellgallery/v/PIMActivation.svg)](https://www.powershellgallery.com/packages/PIMActivation)
 [![PowerShell Gallery](https://img.shields.io/powershellgallery/dt/PIMActivation.svg)](https://www.powershellgallery.com/packages/PIMActivation)
-[![Publish to PowerShell Gallery](https://github.com/Noble-Effeciency13/PIMActivation/actions/workflows/publish-to-psgallery.yml/badge.svg)](https://github.com/Noble-Effeciency13/PIMActivation/actions/workflows/publish-to-psgallery.yml)
+[![Publish to PowerShell Gallery](https://github.com/Noble-Effeciency13/PIMActivation/actions/workflows/PSGalleryPublish.yml/badge.svg)](https://github.com/Noble-Effeciency13/PIMActivation/actions/workflows/PSGalleryPublish.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A comprehensive PowerShell module for managing Microsoft Entra ID Privileged Identity Management (PIM) role activations through an intuitive graphical interface. Streamline your privileged access workflows with support for authentication context, bulk activations, and policy compliance.
