@@ -3,7 +3,7 @@
     RootModule = 'PIMActivation.psm1'
     
     # Version number of this module.
-    ModuleVersion = '1.0.0'
+    ModuleVersion = '1.0.1'
     
     # Supported PSEditions - Requires PowerShell Core (7+)
     CompatiblePSEditions = @('Core')
@@ -64,6 +64,17 @@
             
             # ReleaseNotes
             ReleaseNotes = @'
+## Release Notes v1.0.1
+
+### 🔧 Bug Fixes
+- Fixed authentication context token acquisition for conditional access policies
+- Improved MSAL.PS interactive prompt reliability
+- Enhanced error handling for authentication scenarios
+
+### 🆕 New Features
+- Added token caching to minimize re-authentication prompts
+- Added PowerShell 5.1 fallback for authentication prompts when needed
+
 ## Release Notes v1.0.0
 
 ### 🎉 Initial Release

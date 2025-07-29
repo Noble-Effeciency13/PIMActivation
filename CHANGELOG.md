@@ -5,6 +5,30 @@ All notable changes to the PIMActivation PowerShell module will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Planned Features
+- **Azure Resource Roles**: Support for Azure subscription and resource-level PIM roles
+- **Profile Management**: Save and quickly activate frequently used role combinations
+- **Scheduling**: Plan role activations for future times
+- **Enhanced Reporting**: Built-in activation history and analytics
+- **Automation Integration**: PowerShell DSC and Azure Automation support
+
+---
+
+## [1.0.1] - 2025-07-29
+
+### Fixed
+- Improved MSAL.PS interactive prompt reliability by forcing module reload
+- Added PowerShell 5.1 fallback for authentication prompts when needed
+- Enhanced error handling for authentication context scenarios
+
+### Changed
+- Authentication context tokens are now cached per context ID to minimize authentication prompts
+- Improved token validation and expiry management
+
+---
+
 ## [1.0.0] - 2025-07-28
 
 ### 🎉 Initial Release
@@ -39,17 +63,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## Version History
 
-### Planned Features
-- **Azure Resource Roles**: Support for Azure subscription and resource-level PIM roles
-- **Profile Management**: Save and quickly activate frequently used role combinations
-- **Scheduling**: Plan role activations for future times
-- **Enhanced Reporting**: Built-in activation history and analytics
-- **Automation Integration**: PowerShell DSC and Azure Automation support
+- **v1.0.1** (2025-07-29): Bug fixes for authentication context and MSAL.PS reliability
+- **v1.0.0** (2025-07-28): Initial release with core PIM activation functionality
 
 ---
 
-## Version History
-
-- **v1.0.0** (2025-07-28): Initial release with core PIM activation functionality
+[Unreleased]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/Noble-Effeciency13/PIMActivation/releases/tag/v1.0.0
