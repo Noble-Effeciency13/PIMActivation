@@ -97,10 +97,12 @@ function Clear-AccountHistory {
     [CmdletBinding(SupportsShouldProcess)]
     param()
     
-    Write-Warning "Profile management is not yet implemented. This feature is planned for version 2.0.0."
-    Write-Verbose "Clear-AccountHistory placeholder called"
-    
-    # No-op for now
+    if ($PSCmdlet.ShouldProcess("Account History", "Clear stored account history")) {
+        Write-Warning "Profile management is not yet implemented. This feature is planned for version 2.0.0."
+        Write-Verbose "Clear-AccountHistory placeholder called"
+        
+        # No-op for now - when implemented, this will clear account history
+    }
 }
 
 function Get-PIMActivationProfiles {

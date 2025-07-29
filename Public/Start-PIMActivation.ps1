@@ -113,6 +113,12 @@ function Start-PIMActivation {
     
     process {
         try {
+            # Check if user wants to proceed with starting the PIM activation tool
+            if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
+                Write-Verbose "Operation cancelled by user"
+                return
+            }
+            
             # Ensure Single-Threaded Apartment mode for Windows Forms
             if (-not (Test-STAMode)) {
                 Write-Verbose "Restarting in STA mode for Windows Forms compatibility"
