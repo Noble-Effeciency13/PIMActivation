@@ -148,6 +148,38 @@ We follow [Semantic Versioning](https://semver.org/):
 - `v2.0.0`: Azure resource roles and profiles
 - `v2.1.0`: Cross-platform support
 
+## 🤖 AI-Assisted Development
+
+This project embraces modern development practices including AI-assisted programming. Contributors are encouraged to use AI tools like GitHub Copilot, Claude, or ChatGPT to:
+
+- Accelerate code writing and refactoring
+- Generate comprehensive documentation
+- Identify potential bugs and edge cases
+- Suggest performance optimizations
+- Create test cases and scenarios
+
+### Guidelines for AI-Assisted Contributions
+
+1. **Understand the Code**: Always review and understand AI-generated code before committing
+2. **Test Thoroughly**: AI-generated code must pass all tests and work in real scenarios
+3. **Security Review**: Carefully review AI suggestions for security implications
+4. **Attribution**: When making significant contributions with AI assistance, mention it in your PR description
+5. **Quality Standards**: AI-generated code must meet the same quality standards as human-written code
+
+### Example PR Description with AI Attribution
+```
+This PR adds support for bulk role deactivation.
+
+Changes:
+- Added Invoke-BulkDeactivation function
+- Updated UI to support multi-select for deactivation
+- Added progress tracking for bulk operations
+
+Note: This implementation was developed with assistance from GitHub Copilot, particularly for the parallel processing logic and error handling patterns.
+```
+
+Remember: AI is a tool to enhance productivity, not a replacement for understanding and expertise. The goal is to combine the best of both human insight and AI efficiency.
+
 ## 🤔 Questions?
 
 - Check the [Wiki](https://github.com/Noble-Effeciency13/PIMActivation/wiki)

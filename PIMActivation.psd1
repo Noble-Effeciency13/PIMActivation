@@ -21,7 +21,7 @@
     Copyright = '(c) 2025 Sebastian Flæng Markdanner. All rights reserved.'
 
     # Description of the functionality provided by this module
-    Description = 'PowerShell module for managing Microsoft Entra ID Privileged Identity Management (PIM) role activations through a modern GUI interface. Supports authentication context, bulk operations, and policy compliance. Requires PowerShell 7+.'
+    Description = 'PowerShell module for managing Microsoft Entra ID Privileged Identity Management (PIM) role activations through a modern GUI interface. Supports authentication context, bulk operations, and policy compliance. Developed with AI assistance. Requires PowerShell 7+.'
     
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion = '7.0'
@@ -86,6 +86,10 @@
 - PowerShell 7+ (Download from https://aka.ms/powershell)
 - Microsoft Graph PowerShell modules (auto-installed)
 - Appropriate Entra ID permissions for PIM role management
+- MSAL.PS module for authentication context management
+
+### 📝 Development Note
+This module was developed with the assistance of AI tools (GitHub Copilot and Claude), combining AI-accelerated development with human expertise in Microsoft identity and security workflows.
 
 For detailed usage instructions, see the README.md file.
 '@

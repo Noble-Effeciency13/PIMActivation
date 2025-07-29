@@ -194,11 +194,9 @@ Start-PIMActivation -Verbose
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+I welcome contributions! Please see my [Contributing Guidelines](CONTRIBUTING.md) for details.
 
 ### Development Setup
-```powershell
-## 🛠️ Development
 
 ```powershell
 # Clone the repository
@@ -207,7 +205,6 @@ cd PIMActivation
 
 # Import module for development
 Import-Module .\PIMActivation.psd1 -Force
-```
 
 # Run tests (when available)
 Invoke-Pester
@@ -218,6 +215,12 @@ Invoke-Pester
 - 📚 **Documentation**: Examples, tutorials, and API documentation
 - 🔧 **Features**: Azure resource roles, profile management
 - 🐛 **Bug Fixes**: Issue resolution and performance improvements
+
+## 🤖 Development Transparency
+
+This module was developed using modern AI-assisted programming practices, combining AI tools (GitHub Copilot and Claude) with human expertise in Microsoft identity and security workflows. All code has been thoroughly reviewed, tested, and validated in production environments.
+
+The authentication context implementation particularly benefited from AI assistance in solving complex token management and timing challenges. The result is production-ready code that leverages the efficiency of AI-assisted development while maintaining high standards of quality and security.
 
 ## 📄 License
 
