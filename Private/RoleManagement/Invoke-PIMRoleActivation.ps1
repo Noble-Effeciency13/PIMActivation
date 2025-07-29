@@ -955,21 +955,30 @@ function Get-AuthenticationContextToken {
         
         $accessToken = $null
         
-        # Always use PowerShell 5.1 for MSAL interactive authentication (required for proper UI)
-        Write-Verbose "Using PowerShell 5.1 process for MSAL interactive authentication"
-        
-        # Since MSAL.PS has compatibility issues in PowerShell 5.1, let's use a direct approach
-        # We'll use the current PowerShell 7 session but with a method that works consistently
-        Write-Verbose "Using fallback method: Direct MSAL authentication in current PowerShell session"
+        # Force reimport MSAL.PS to ensure clean state
+        Write-Verbose "Forcing MSAL.PS module reload to ensure interactive prompt"
+        try {
+            # Remove the module if it's loaded
+            if (Get-Module -Name MSAL.PS) {
+                Remove-Module MSAL.PS -Force -ErrorAction SilentlyContinue
+                Write-Verbose "Removed existing MSAL.PS module"
+            }
+            
+            # Clear any module state
+            if (Test-Path Variable:\Global:MSAL) {
+                Remove-Variable -Name MSAL -Scope Global -Force -ErrorAction SilentlyContinue
+            }
+            
+            # Import module fresh
+            Import-Module MSAL.PS -Force -ErrorAction Stop
+            Write-Verbose "MSAL.PS module reimported successfully"
+        }
+        catch {
+            Write-Warning "Failed to reload MSAL.PS module: $($_.Exception.Message)"
+        }
         
         # Try to get authentication context token using current session
         try {
-            # Ensure MSAL.PS module is available in current session
-            if (-not (Get-Module -Name MSAL.PS)) {
-                Import-Module MSAL.PS -Force -ErrorAction Stop
-                Write-Verbose "MSAL.PS module imported in current session"
-            }
-            
             # Get token with the specific authentication context claims
             $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
             $scopes = @("https://graph.microsoft.com/.default")
@@ -977,13 +986,17 @@ function Get-AuthenticationContextToken {
             Write-Verbose "Attempting to acquire token with authentication context claim for context: $ContextId"
             Write-Verbose "Claims JSON: $claimsJson"
             
+            # Use a unique correlation ID to force a new authentication flow
+            $correlationId = [Guid]::NewGuid().ToString()
+            
             $tokenStartTime = Get-Date
             $tokenResult = Get-MsalToken -ClientId $clientId `
                                          -TenantId $tenantId `
                                          -Scopes $scopes `
                                          -Interactive `
-                                         -Prompt SelectAccount `
-                                         -ExtraQueryParameters @{ "claims" = $claimsJson } `
+                                         -Prompt 'SelectAccount' `
+                                         -ExtraQueryParameters @{ "claims" = $claimsJson} `
+                                         -CorrelationId $correlationId `
                                          -ErrorAction Stop
             
             if (-not $tokenResult) {
@@ -1000,8 +1013,97 @@ function Get-AuthenticationContextToken {
             
         } catch {
             Write-Verbose "Direct authentication in current session failed: $($_.Exception.Message)"
-            Write-Verbose "This is expected if running in a non-interactive context or if MSAL UI components are not available"
-            throw "Failed to obtain authentication context token for context $ContextId`: $($_.Exception.Message)"
+            
+            # If the interactive prompt still doesn't show, try PowerShell 5.1 as fallback
+            Write-Verbose "Falling back to PowerShell 5.1 for interactive authentication"
+            
+            $ps5Script = @'
+param($ClientId, $TenantId, $Scopes, $ClaimsJson)
+try {
+    # Force clean state
+    if (Get-Module -Name MSAL.PS) {
+        Remove-Module MSAL.PS -Force
+    }
+    Import-Module MSAL.PS -Force
+    
+    $correlationId = [Guid]::NewGuid().ToString()
+    $tokenResult = Get-MsalToken -ClientId $ClientId `
+                                 -TenantId $TenantId `
+                                 -Scopes $Scopes.Split(' ') `
+                                 -Interactive `
+                                 -Prompt 'SelectAccount' `
+                                 -ExtraQueryParameters @{ 
+                                     "claims" = $ClaimsJson
+                                     "prompt" = "select_account"
+                                 } `
+                                 -CorrelationId $correlationId `
+                                 -ErrorAction Stop
+    
+    if ($tokenResult -and $tokenResult.AccessToken) {
+        @{
+            Success = $true
+            AccessToken = $tokenResult.AccessToken
+        } | ConvertTo-Json -Compress
+    } else {
+        @{
+            Success = $false
+            Error = "No token returned"
+        } | ConvertTo-Json -Compress
+    }
+} catch {
+    @{
+        Success = $false
+        Error = $_.Exception.Message
+    } | ConvertTo-Json -Compress
+}
+'@
+
+            # Execute in PowerShell 5.1
+            $ps5Path = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+            
+            # Create temporary script file
+            $tempScript = [System.IO.Path]::GetTempFileName()
+            $ps5Script | Out-File -FilePath $tempScript -Encoding UTF8
+            
+            try {
+                # Execute script and capture output
+                $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+                $processInfo.FileName = $ps5Path
+                $processInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -STA -File `"$tempScript`" -ClientId `"$clientId`" -TenantId `"$tenantId`" -Scopes `"$($scopes -join ' ')`" -ClaimsJson `"$claimsJson`""
+                $processInfo.RedirectStandardOutput = $true
+                $processInfo.RedirectStandardError = $true
+                $processInfo.UseShellExecute = $false
+                $processInfo.CreateNoWindow = $true
+                
+                $process = New-Object System.Diagnostics.Process
+                $process.StartInfo = $processInfo
+                [void]$process.Start()
+                
+                $output = $process.StandardOutput.ReadToEnd()
+                $errorOutput = $process.StandardError.ReadToEnd()
+                $process.WaitForExit()
+                
+                if ($errorOutput) {
+                    Write-Verbose "PS5 error output: $errorOutput"
+                }
+                
+                if ($output) {
+                    $result = $output | ConvertFrom-Json
+                    
+                    if ($result.Success) {
+                        $accessToken = $result.AccessToken
+                        Write-Verbose "Successfully obtained authentication context token via PowerShell 5.1 fallback"
+                    } else {
+                        throw "Failed to obtain authentication context token via PS5: $($result.Error)"
+                    }
+                } else {
+                    throw "No output received from PowerShell 5.1 authentication process"
+                }
+            }
+            finally {
+                # Cleanup
+                Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
+            }
         }
         
         # Cache the token for reuse (assume 45 minutes expiry for safety)
