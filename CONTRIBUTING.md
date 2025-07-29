@@ -1,197 +1,59 @@
 # Contributing to PIMActivation
 
-Thank you for your interest in contributing to PIMActivation! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to PIMActivation! We welcome contributions from the community to help make PIM management better for everyone.
 
-## 🤝 How to Contribute
+## 📖 Full Documentation
 
-### Reporting Issues
-- Use the [GitHub Issues](https://github.com/Noble-Effeciency13/PIMActivation/issues) page
-- Search existing issues before creating a new one
-- Provide detailed information including:
-  - PowerShell version
-  - Operating system
-  - Steps to reproduce
-  - Expected vs actual behavior
-  - Error messages (if any)
+For comprehensive contribution guidelines, technical setup, and detailed information, please visit our **[Contributing Guide in the Wiki](https://github.com/Noble-Effeciency13/PIMActivation/wiki/Contributing)**.
 
-### Suggesting Features
-- Open a [Feature Request](https://github.com/Noble-Effeciency13/PIMActivation/issues/new?template=feature_request.md)
-- Describe the use case and benefits
-- Consider implementation complexity
+## 🚀 Quick Start
 
-### Pull Requests
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Test thoroughly
-5. Commit with clear messages (`git commit -m 'Add amazing feature'`)
-6. Push to your branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
+1. **Fork** the repository
+2. **Clone** your fork: `git clone https://github.com/[YourUsername]/PIMActivation.git`
+3. **Create** a feature branch: `git checkout -b feature/amazing-feature`
+4. **Make** your changes
+5. **Test** thoroughly with PowerShell 7+
+6. **Commit** with clear messages: `git commit -m 'Add amazing feature'`
+7. **Push** to your branch: `git push origin feature/amazing-feature`
+8. **Open** a Pull Request
 
-## 🛠️ Development Setup
+## 🤝 Ways to Contribute
 
-### Prerequisites
-- Windows 10/11 or Windows Server 2016+
-- PowerShell 7+ (Download from [https://aka.ms/powershell](https://aka.ms/powershell))
-- Git for version control
-- Visual Studio Code (recommended)
+- **🐛 Bug Reports**: Found something broken? [Open an issue](https://github.com/Noble-Effeciency13/PIMActivation/issues/new?template=bug_report.md)
+- **✨ Feature Requests**: Have an idea? [Suggest it](https://github.com/Noble-Effeciency13/PIMActivation/issues/new?template=feature_request.md)
+- **📚 Documentation**: Help improve docs, examples, or wiki content
+- **🧪 Testing**: Add unit tests or help with manual testing
+- **💻 Code**: Fix bugs, add features, or improve performance
 
-### Local Development
-```powershell
-# Clone the repository
-git clone https://github.com/Noble-Effeciency13/PIMActivation.git
-cd PIMActivation
+## 📋 Before You Submit Make Sure
 
-# Import the module for testing
-Import-Module .\PIMActivation.psd1 -Force
-
-# Test the module
-Start-PIMActivation
-```
-
-### Testing
-Currently, the project uses manual testing. Automated tests are welcome contributions!
-
-```powershell
-# Manual testing checklist
-# 1. Module imports without errors
-# 2. GUI launches successfully
-# 3. Authentication works
-# 4. Role activation functions properly
-# 5. Error handling works as expected
-```
-
-## 📝 Coding Standards
-
-### PowerShell Best Practices
-- Follow [PowerShell Best Practices](https://docs.microsoft.com/en-us/powershell/scripting/developer/cmdlet/strongly-encouraged-development-guidelines)
-- Use approved verbs for function names
-- Include comprehensive help documentation
-- Use `Write-Verbose` for debugging information
-- Handle errors gracefully with try/catch blocks
-
-### Code Style
-- Use 4 spaces for indentation
-- Place opening braces on the same line
-- Use meaningful variable and function names
-- Include comments for complex logic
-- Follow PowerShell naming conventions
-
-### Documentation
-- Update README.md for user-facing changes
-- Update CHANGELOG.md for all changes
-- Include inline comments for complex code
-- Update help documentation for new functions
-
-## 🎯 Priority Areas
-
-### High Priority
-- **Unit Tests**: PowerShell Pester tests
-- **Azure Resource Roles**: Implementation of Azure resource support
-- **Error Handling**: Improved user feedback and error recovery
-- **Performance**: Optimization of API calls and UI responsiveness
-
-### Medium Priority
-- **Profile Management**: Save/load role activation profiles
-- **Logging**: Structured logging with configurable levels
-- **Internationalization**: Support for multiple languages
-- **Accessibility**: Improved GUI accessibility
-
-### Low Priority
-- **Themes**: Dark mode and custom themes
-- **Keyboard Shortcuts**: Additional hotkeys for power users
-- **Export/Import**: Configuration backup and restore
-
-## 🔍 Code Review Process
-
-### For Contributors
-- Ensure code follows style guidelines
-- Test on PowerShell 7+ (Core edition)
-- Update documentation as needed
-- Keep PRs focused and atomic
-
-### For Maintainers
-- Review for functionality and style
-- Test on PowerShell 7+ environments
-- Verify documentation updates
-- Check for breaking changes
-
-## 📋 Release Process
-
-### Version Numbering
-We follow [Semantic Versioning](https://semver.org/):
-- **Major** (X.0.0): Breaking changes
-- **Minor** (0.X.0): New features, backward compatible
-- **Patch** (0.0.X): Bug fixes, backward compatible
-
-### Release Checklist
-1. Update version in `PIMActivation.psd1`
-2. Update `CHANGELOG.md`
-3. Update `README.md` if needed
-4. Test thoroughly
-5. Create GitHub release
-6. Publish to PowerShell Gallery
-
-## 🏷️ Labels and Milestones
-
-### Issue Labels
-- `bug`: Something isn't working
-- `enhancement`: New feature or request
-- `documentation`: Improvements or additions to docs
-- `good first issue`: Good for newcomers
-- `help wanted`: Extra attention is needed
-- `priority-high`: Critical issues
-- `priority-low`: Nice to have
-
-### Milestones
-- `v1.1.0`: Bug fixes and minor improvements
-- `v2.0.0`: Azure resource roles and profiles
-- `v2.1.0`: Cross-platform support
+- ✅ Code follows PowerShell best practices
+- ✅ Changes work on PowerShell 7+
+- ✅ Documentation is updated if needed
+- ✅ Commit messages are clear and descriptive
 
 ## 🤖 AI-Assisted Development
 
-This project embraces modern development practices including AI-assisted programming. Contributors are encouraged to use AI tools like GitHub Copilot, Claude, or ChatGPT to:
+We embrace modern development practices including AI-assisted programming. If you use AI tools (GitHub Copilot, Claude, ChatGPT) for significant portions of your contribution, please mention it in your PR description. All code must be thoroughly understood, tested, and validated regardless of its origin.
 
-- Accelerate code writing and refactoring
-- Generate comprehensive documentation
-- Identify potential bugs and edge cases
-- Suggest performance optimizations
-- Create test cases and scenarios
+## ❓ Questions?
 
-### Guidelines for AI-Assisted Contributions
-
-1. **Understand the Code**: Always review and understand AI-generated code before committing
-2. **Test Thoroughly**: AI-generated code must pass all tests and work in real scenarios
-3. **Security Review**: Carefully review AI suggestions for security implications
-4. **Attribution**: When making significant contributions with AI assistance, mention it in your PR description
-5. **Quality Standards**: AI-generated code must meet the same quality standards as human-written code
-
-### Example PR Description with AI Attribution
-```
-This PR adds support for bulk role deactivation.
-
-Changes:
-- Added Invoke-BulkDeactivation function
-- Updated UI to support multi-select for deactivation
-- Added progress tracking for bulk operations
-
-Note: This implementation was developed with assistance from GitHub Copilot, particularly for the parallel processing logic and error handling patterns.
-```
-
-Remember: AI is a tool to enhance productivity, not a replacement for understanding and expertise. The goal is to combine the best of both human insight and AI efficiency.
-
-## 🤔 Questions?
-
-- Check the [Wiki](https://github.com/Noble-Effeciency13/PIMActivation/wiki)
-- Join [Discussions](https://github.com/Noble-Effeciency13/PIMActivation/discussions)
-- Ask in issues with the `question` label
-- Read the [detailed blog post](https://www.chanceofsecurity.com/post/microsoft-entra-pim-bulk-role-activation-tool) about this solution
-- Visit [Chance of Security](https://www.chanceofsecurity.com/) for more security insights
+- 💬 [Join the Discussions](https://github.com/Noble-Effeciency13/PIMActivation/discussions)
+- 📖 [Check the Wiki](https://github.com/Noble-Effeciency13/PIMActivation/wiki)
+- 📝 [Read the Blog Post](https://www.chanceofsecurity.com/post/microsoft-entra-pim-bulk-role-activation-tool)
 
 ## 📄 License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the same [MIT License](LICENSE) that covers this project.
 
 ---
+
+**Ready to dive deeper?** Visit our **[comprehensive Contributing Guide in the Wiki](https://github.com/Noble-Effeciency13/PIMActivation/wiki/Contributing)** for:
+- Detailed development environment setup
+- Code style guidelines and standards
+- Testing requirements and procedures
+- Pull request process and checklist
+- Architecture documentation
+- And much more!
 
 Thank you for helping make PIMActivation better! 🎉
