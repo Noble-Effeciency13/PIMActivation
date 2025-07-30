@@ -380,7 +380,11 @@ function Update-PIMRolesList {
                                 if ($role.Type -eq 'Entra') {
                                     # Check if the role has the required property
                                     if ($role.PSObject.Properties['RoleDefinitionId']) {
-                                        $pendingMatch = $pendingRequests | Where-Object { $_.Type -eq 'Entra' -and $_.RoleDefinitionId -eq $role.RoleDefinitionId } | Select-Object -First 1
+                                        $pendingMatch = $pendingRequests | Where-Object { 
+                                            $_.Type -eq 'Entra' -and 
+                                            $_.PSObject.Properties['RoleDefinitionId'] -and 
+                                            $_.RoleDefinitionId -eq $role.RoleDefinitionId 
+                                        } | Select-Object -First 1
                                         $hasPendingRequest = [bool]$pendingMatch
                                         if ($pendingMatch) {
                                             Write-Verbose "Found pending request for Entra role: $($role.DisplayName) (ID: $($role.RoleDefinitionId))"
@@ -391,7 +395,11 @@ function Update-PIMRolesList {
                                 } elseif ($role.Type -eq 'Group') {
                                     # Check if the role has the required property
                                     if ($role.PSObject.Properties['GroupId']) {
-                                        $pendingMatch = $pendingRequests | Where-Object { $_.Type -eq 'Group' -and $_.GroupId -eq $role.GroupId } | Select-Object -First 1
+                                        $pendingMatch = $pendingRequests | Where-Object { 
+                                            $_.Type -eq 'Group' -and 
+                                            $_.PSObject.Properties['GroupId'] -and 
+                                            $_.GroupId -eq $role.GroupId 
+                                        } | Select-Object -First 1
                                         $hasPendingRequest = [bool]$pendingMatch
                                         if ($pendingMatch) {
                                             Write-Verbose "Found pending request for Group role: $($role.DisplayName) (ID: $($role.GroupId))"

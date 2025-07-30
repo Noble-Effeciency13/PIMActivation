@@ -67,7 +67,7 @@ The following modules will be automatically installed if missing:
 - `Microsoft.Graph.Users`
 - `Microsoft.Graph.Identity.DirectoryManagement`
 - `Microsoft.Graph.Identity.Governance`
-- `MSAL.PS` (4.37+)
+- `Az.Accounts` (3.0+) - provides WAM authentication support
 
 ### Microsoft Entra ID Permissions
 Your account needs the following **delegated** permissions:
@@ -152,15 +152,14 @@ Disconnect-MgGraph
 ```powershell
 # Clear authentication cache
 Disconnect-MgGraph
-Clear-MsalTokenCache
 
 # Restart with fresh authentication
 Start-PIMActivation -ForceNewAccount
 ```
 
 **PowerShell Version Issues**
-- The module requires PowerShell 7+ for modern language features and optimal performance
-- For authentication context scenarios, it may launch Windows PowerShell 5.1 processes internally for optimal MSAL.PS compatibility
+- The module requires PowerShell 7+ for modern language features and WAM authentication support
+- WAM (Windows Web Account Manager) provides more reliable authentication on Windows 10/11
 
 **Permission Errors**
 - Ensure your account has the required PIM role assignments
@@ -176,7 +175,7 @@ Start-PIMActivation -Verbose
 ## 🔒 Security Considerations
 
 - **Credential Management**: Uses Microsoft Graph delegated permissions, no credentials are stored
-- **Token Handling**: Leverages MSAL.PS for secure token management with automatic refresh
+- **Token Handling**: Leverages WAM (Windows Web Account Manager) for secure token management with automatic refresh
 - **Authentication Context**: Properly handles conditional access policies and authentication challenges
 - **Audit Trail**: All role activations are logged in Entra ID audit logs
 
@@ -237,8 +236,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- Microsoft Graph PowerShell SDK team for excellent API support
-- MSAL.PS contributors for authentication library
+- **Trevor Jones** for his excellent blog post on [WAM authentication in PowerShell](https://smsagent.blog/2024/11/28/getting-an-access-token-for-microsoft-entra-in-powershell-using-the-web-account-manager-wam-broker-in-windows/) which was instrumental in implementing reliable authentication
 - PowerShell community for best practices and feedback
 
 ---

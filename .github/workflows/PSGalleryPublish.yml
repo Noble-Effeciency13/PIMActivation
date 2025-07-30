@@ -31,7 +31,7 @@ jobs:
         Install-Module -Name Microsoft.Graph.Users -Force -AllowClobber
         Install-Module -Name Microsoft.Graph.Identity.DirectoryManagement -Force -AllowClobber
         Install-Module -Name Microsoft.Graph.Identity.Governance -Force -AllowClobber
-        Install-Module -Name MSAL.PS -Force -AllowClobber
+        Install-Module -Name Az.Accounts -Force -AllowClobber
     
     - name: Test module manifest
       shell: pwsh

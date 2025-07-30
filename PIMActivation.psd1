@@ -3,7 +3,7 @@
     RootModule = 'PIMActivation.psm1'
     
     # Version number of this module.
-    ModuleVersion = '1.0.1'
+    ModuleVersion = '1.1.0'
     
     # Supported PSEditions - Requires PowerShell Core (7+)
     CompatiblePSEditions = @('Core')
@@ -32,7 +32,7 @@
         @{ ModuleName = 'Microsoft.Graph.Users'; ModuleVersion = '2.0.0' },
         @{ ModuleName = 'Microsoft.Graph.Identity.DirectoryManagement'; ModuleVersion = '2.0.0' },
         @{ ModuleName = 'Microsoft.Graph.Identity.Governance'; ModuleVersion = '2.0.0' },
-        @{ ModuleName = 'MSAL.PS'; ModuleVersion = '4.37.0' }
+        @{ ModuleName = 'Az.Accounts'; ModuleVersion = '3.0.0' }
     )
     
     # Functions to export from this module
@@ -64,16 +64,36 @@
             
             # ReleaseNotes
             ReleaseNotes = @'
+## Release Notes v1.1.0
+
+### � Major Improvements
+- **WAM Authentication**: Implemented Windows Web Account Manager (WAM) for reliable authentication
+- **Removed MSAL.PS Dependency**: Now uses direct MSAL.NET calls for better reliability and performance
+- **Enhanced Authentication Context**: Improved handling of conditional access policies
+
+### 🔧 Technical Changes
+- Direct integration with Az.Accounts MSAL assemblies
+- Eliminated PowerShell 5.1 fallback - now fully PowerShell 7+ native
+- Improved error handling and timeout management
+- Better assembly loading and management
+
 ## Release Notes v1.0.1
 
 ### 🔧 Bug Fixes
 - Fixed authentication context token acquisition for conditional access policies
-- Improved MSAL.PS interactive prompt reliability
 - Enhanced error handling for authentication scenarios
+- Improved MSAL.PS integration for more reliable interactive authentication prompts
+- Fixed timing issues with authentication context token validation
 
 ### 🆕 New Features
 - Added token caching to minimize re-authentication prompts
-- Added PowerShell 5.1 fallback for authentication prompts when needed
+- Enhanced authentication context flow with better error messages
+- Improved handling of authentication timeouts and cancellation
+
+### 🔧 Technical Changes
+- Better integration with MSAL.PS for authentication context scenarios
+- Enhanced token validation and refresh logic
+- Improved error handling for authentication context failures
 
 ## Release Notes v1.0.0
 
@@ -87,7 +107,6 @@
 - **Real-time Updates**: Live monitoring of active assignments and pending requests
 
 ### 🔧 Technical Features
-- Hybrid PowerShell architecture for optimal MSAL.PS compatibility
 - Direct REST API calls for authentication context preservation  
 - Automatic module dependency management
 - Comprehensive error handling and user feedback
@@ -96,8 +115,8 @@
 - Windows Operating System
 - PowerShell 7+ (Download from https://aka.ms/powershell)
 - Microsoft Graph PowerShell modules (auto-installed)
+- Az.Accounts module for WAM authentication support
 - Appropriate Entra ID permissions for PIM role management
-- MSAL.PS module for authentication context management
 
 ### 📝 Development Note
 This module was developed with the assistance of AI tools (GitHub Copilot and Claude), combining AI-accelerated development with human expertise in Microsoft identity and security workflows.

@@ -59,13 +59,12 @@ function Install-RequiredModules {
                 @{Name = 'Microsoft.Graph.Users'; MinVersion = '2.0.0'},
                 @{Name = 'Microsoft.Graph.Identity.DirectoryManagement'; MinVersion = '2.0.0'},
                 @{Name = 'Microsoft.Graph.Identity.Governance'; MinVersion = '2.0.0'},
-                @{Name = 'MSAL.PS'; MinVersion = '4.36.1'}
+                @{Name = 'Az.Accounts'; MinVersion = '3.0.0'}
             )
             
             if ($IncludeAzureModules) {
                 Write-Verbose "Including Azure PowerShell modules"
                 $RequiredModules += @(
-                    @{Name = 'Az.Accounts'; MinVersion = '2.0.0'},
                     @{Name = 'Az.Resources'; MinVersion = '6.0.0'}
                 )
             }

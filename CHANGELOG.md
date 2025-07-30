@@ -16,11 +16,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2025-07-30
+
+### Added
+- **WAM Authentication**: Implemented Windows Web Account Manager (WAM) for more reliable authentication
+- Direct integration with Az.Accounts MSAL assemblies for better performance
+- Enhanced timeout management and error handling for authentication flows
+
+### Credits
+- WAM implementation inspired by Trevor Jones' excellent blog post: [Getting an access token for Microsoft Entra in PowerShell using the Web Account Manager (WAM) broker in Windows](https://smsagent.blog/2024/11/28/getting-an-access-token-for-microsoft-entra-in-powershell-using-the-web-account-manager-wam-broker-in-windows/)
+
+### Removed
+- **MSAL.PS Dependency**: Removed dependency on MSAL.PS module
+- PowerShell 5.1 fallback processes - now fully PowerShell 7+ native
+
+### Changed
+- Improved authentication context handling with direct MSAL.NET calls
+- Better assembly loading and management from Az.Accounts module
+- Enhanced error messages and troubleshooting information
+
+### Fixed
+- Resolved authentication hanging issues with proper async/sync handling
+- Improved reliability of authentication prompts on Windows 10/11
+
+---
+
 ## [1.0.1] - 2025-07-29
 
 ### Fixed
-- Improved MSAL.PS interactive prompt reliability by forcing module reload
-- Added PowerShell 5.1 fallback for authentication prompts when needed
 - Enhanced error handling for authentication context scenarios
 
 ### Changed
@@ -44,11 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Account Management**: Easy account switching without application restart
 
 #### Technical Features
-- Hybrid PowerShell architecture for optimal MSAL.PS compatibility
 - Direct REST API calls for authentication context preservation
 - Automatic module dependency management
 - Comprehensive error handling and user feedback
-- Support for PowerShell 7+ with hybrid PowerShell 5.1 processes for optimal MSAL.PS compatibility
+- Full PowerShell 7+ compatibility with modern language features
 
 #### Requirements
 - Windows Operating System (Windows 10/11 or Windows Server 2016+)

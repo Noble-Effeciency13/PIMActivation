@@ -135,7 +135,7 @@ function Connect-PIMServices {
                 'Microsoft.Graph.Users',
                 'Microsoft.Graph.Identity.DirectoryManagement',
                 'Microsoft.Graph.Identity.Governance',
-                'MSAL.PS'
+                'Az.Accounts'
             )
             
             # Resolve module version conflicts and ensure latest versions are loaded
