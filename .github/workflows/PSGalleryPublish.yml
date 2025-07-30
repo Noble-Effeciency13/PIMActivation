@@ -14,15 +14,6 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     
-    - name: Setup PowerShell
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-    
-    - name: Install PowerShell 7
-      run: |
-        Invoke-Expression "& { $(Invoke-RestMethod 'https://aka.ms/install-powershell.ps1') } -UseMSI -Quiet"
-        
     - name: Install required modules
       shell: pwsh
       run: |
@@ -36,11 +27,11 @@ jobs:
     - name: Test module manifest
       shell: pwsh
       run: |
-        Test-ModuleManifest -Path ./PIMActivation/PIMActivation.psd1
+        Test-ModuleManifest -Path ./PIMActivation.psd1
     
     - name: Publish to PSGallery
       shell: pwsh
       env:
         NUGET_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
       run: |
-        Publish-Module -Path ./PIMActivation -NuGetApiKey $env:NUGET_API_KEY -Verbose
+        Publish-Module -Path . -NuGetApiKey $env:NUGET_API_KEY -Verbose
