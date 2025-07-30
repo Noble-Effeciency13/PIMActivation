@@ -9,10 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned Features
 - **Azure Resource Roles**: Support for Azure subscription and resource-level PIM roles
-- **Profile Management**: Save and quickly activate frequently used role combinations
+- **Profile Management**: Save and quickly activate frequently used role combinations and accounts
 - **Scheduling**: Plan role activations for future times
 - **Enhanced Reporting**: Built-in activation history and analytics
-- **Automation Integration**: PowerShell DSC and Azure Automation support
 
 ---
 
