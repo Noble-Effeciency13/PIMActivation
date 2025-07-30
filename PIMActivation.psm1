@@ -49,6 +49,16 @@ $script:AuthContextTokens = @{}  # New: Hashtable of contextId -> token
 $script:JustCompletedAuthContext = $null
 $script:AuthContextCompletionTime = $null
 
+# Module loading state for just-in-time loading
+$script:ModuleLoadingState = @{}
+$script:RequiredModuleVersions = @{
+    'Microsoft.Graph.Authentication' = '2.29.1'
+    'Microsoft.Graph.Users' = '2.29.1'
+    'Microsoft.Graph.Identity.DirectoryManagement' = '2.29.1'
+    'Microsoft.Graph.Identity.Governance' = '2.29.1'
+    'Az.Accounts' = '5.1.0'
+}
+
 #endregion Module Setup
 
 #region Import Functions

@@ -36,9 +36,9 @@ function Connect-PIMServices {
     
     .DESCRIPTION
         Creates authenticated connections to Microsoft services based on the specified role types.
+        Uses just-in-time module loading with version pinning to ensure compatibility.
         Handles Microsoft Graph authentication for Entra ID roles and groups, and Azure Resource Manager
-        authentication for Azure resource roles. Manages module version conflicts and provides
-        comprehensive connection validation.
+        authentication for Azure resource roles.
     
     .PARAMETER IncludeEntraRoles
         Specifies whether to establish connection for Entra ID role management.
@@ -84,15 +84,12 @@ function Connect-PIMServices {
         Forces account selection and displays the connected user information.
     
     .NOTES
-        This function requires the following PowerShell modules to be installed:
-        - Microsoft.Graph.Authentication
-        - Microsoft.Graph.Users
-        - Microsoft.Graph.Identity.DirectoryManagement
-        - Microsoft.Graph.Identity.Governance
-        - Az.Accounts (if IncludeAzureResources is specified)
-        
-        The function automatically handles module version conflicts by removing and reimporting
-        the latest available versions.
+        This function uses just-in-time module loading with pinned versions:
+        - Microsoft.Graph.Authentication 2.28.0
+        - Microsoft.Graph.Users 2.28.0
+        - Microsoft.Graph.Identity.DirectoryManagement 2.28.0
+        - Microsoft.Graph.Identity.Governance 2.28.0
+        - Az.Accounts 5.1.0
     
     .LINK
         https://docs.microsoft.com/en-us/powershell/microsoftgraph/
@@ -129,46 +126,18 @@ function Connect-PIMServices {
         if ($IncludeEntraRoles -or $IncludeGroups) {
             Write-Verbose "Initializing Microsoft Graph connection..."
             
-            # Define required Graph modules
-            $requiredModules = @(
-                'Microsoft.Graph.Authentication',
-                'Microsoft.Graph.Users',
-                'Microsoft.Graph.Identity.DirectoryManagement',
-                'Microsoft.Graph.Identity.Governance',
-                'Az.Accounts'
-            )
+            # Initialize PIM modules with version pinning
+            $moduleInit = Initialize-PIMModules
+            if (-not $moduleInit.Success) {
+                $result.Error = "Failed to initialize PIM modules: $($moduleInit.Error)"
+                return $result
+            }
             
-            # Resolve module version conflicts and ensure latest versions are loaded
-            foreach ($moduleName in $requiredModules) {
-                $loadedModules = @(Get-Module -Name $moduleName -ErrorAction SilentlyContinue)
-                
-                if ($loadedModules.Count -gt 1) {
-                    Write-Verbose "Resolving version conflict for $moduleName..."
-                    $loadedModules | Remove-Module -Force -ErrorAction SilentlyContinue
-                    
-                    $latestModule = Get-Module -ListAvailable -Name $moduleName | 
-                                   Sort-Object Version -Descending | 
-                                   Select-Object -First 1
-                    
-                    if ($latestModule) {
-                        Import-Module -Name $moduleName -RequiredVersion $latestModule.Version -Force -ErrorAction Stop
-                        Write-Verbose "Loaded $moduleName v$($latestModule.Version)"
-                    }
-                }
-                elseif ($loadedModules.Count -eq 0) {
-                    $availableModule = Get-Module -ListAvailable -Name $moduleName | 
-                                      Sort-Object Version -Descending | 
-                                      Select-Object -First 1
-                    
-                    if ($availableModule) {
-                        Import-Module -Name $moduleName -RequiredVersion $availableModule.Version -Force -ErrorAction Stop
-                        Write-Verbose "Loaded $moduleName v$($availableModule.Version)"
-                    }
-                    else {
-                        $result.Error = "Required module '$moduleName' not found. Install with: Install-Module -Name $moduleName"
-                        return $result
-                    }
-                }
+            # Load Microsoft Graph Authentication module (just-in-time)
+            $authLoaded = Import-PIMModule -ModuleName 'Microsoft.Graph.Authentication'
+            if (-not $authLoaded) {
+                $result.Error = "Failed to load Microsoft.Graph.Authentication module"
+                return $result
             }
             
             # Initialize System.Web assembly for URL encoding
@@ -215,6 +184,29 @@ function Connect-PIMServices {
                 'RoleManagementPolicy.Read.AzureADGroup'
                 'Policy.Read.ConditionalAccess'
             )
+            
+            # Load additional Graph modules as needed
+            if ($IncludeEntraRoles) {
+                $loaded = Import-PIMModule -ModuleName 'Microsoft.Graph.Identity.DirectoryManagement'
+                if (-not $loaded) {
+                    $result.Error = "Failed to load Microsoft.Graph.Identity.DirectoryManagement module"
+                    return $result
+                }
+                
+                $loaded = Import-PIMModule -ModuleName 'Microsoft.Graph.Identity.Governance'
+                if (-not $loaded) {
+                    $result.Error = "Failed to load Microsoft.Graph.Identity.Governance module"
+                    return $result
+                }
+            }
+            
+            if ($IncludeEntraRoles -or $IncludeGroups) {
+                $loaded = Import-PIMModule -ModuleName 'Microsoft.Graph.Users'
+                if (-not $loaded) {
+                    $result.Error = "Failed to load Microsoft.Graph.Users module"
+                    return $result
+                }
+            }
                         
             try {
                 # Establish Graph connection
@@ -256,6 +248,15 @@ function Connect-PIMServices {
         
         # Establish Azure Resource Manager connection if required
         if ($IncludeAzureResources) {
+            Write-Verbose "Initializing Azure Resource Manager connection..."
+            
+            # Load Az.Accounts module (just-in-time)
+            $azLoaded = Import-PIMModule -ModuleName 'Az.Accounts'
+            if (-not $azLoaded) {
+                $result.Error = "Failed to load Az.Accounts module"
+                return $result
+            }
+            
             Write-Warning "Azure Resource role management is not yet implemented. Skipping Azure connection for version 2.0.0."
             Write-Verbose "Azure resource support placeholder - connection skipped"
             

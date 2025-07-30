@@ -18,11 +18,13 @@ jobs:
       shell: pwsh
       run: |
         Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-        Install-Module -Name Microsoft.Graph.Authentication -Force -AllowClobber
-        Install-Module -Name Microsoft.Graph.Users -Force -AllowClobber
-        Install-Module -Name Microsoft.Graph.Identity.DirectoryManagement -Force -AllowClobber
-        Install-Module -Name Microsoft.Graph.Identity.Governance -Force -AllowClobber
-        Install-Module -Name Az.Accounts -Force -AllowClobber
+        # Install compatible versions to avoid known compatibility issues
+        # Microsoft.Graph 2.29.1 + Az.Accounts 5.1.0 is a tested working combination
+        Install-Module -Name Microsoft.Graph.Authentication -RequiredVersion 2.29.1 -Force -AllowClobber
+        Install-Module -Name Microsoft.Graph.Users -RequiredVersion 2.29.1 -Force -AllowClobber
+        Install-Module -Name Microsoft.Graph.Identity.DirectoryManagement -RequiredVersion 2.29.1 -Force -AllowClobber
+        Install-Module -Name Microsoft.Graph.Identity.Governance -RequiredVersion 2.29.1 -Force -AllowClobber
+        Install-Module -Name Az.Accounts -RequiredVersion 5.1.0 -Force -AllowClobber
     
     - name: Test module manifest
       shell: pwsh

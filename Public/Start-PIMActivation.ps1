@@ -151,13 +151,6 @@ function Start-PIMActivation {
                 Write-Verbose "Validating required PowerShell modules"
                 Update-LoadingStatus -SplashForm $splashForm -Status "Checking dependencies..." -Progress 10
                 
-                $requiredModules = @(
-                    @{Name = 'Microsoft.Graph.Authentication'; MinVersion = '2.0.0'}
-                    @{Name = 'Microsoft.Graph.Users'; MinVersion = '2.0.0'}
-                    @{Name = 'Microsoft.Graph.Identity.DirectoryManagement'; MinVersion = '2.0.0'}
-                    @{Name = 'Microsoft.Graph.Identity.Governance'; MinVersion = '2.0.0'}
-                )
-                
                 # Add Azure modules if Azure resources are requested
                 if ($IncludeAzureResources) {
                     Write-Warning "Azure Resource role management is not yet implemented. This parameter will be functional in version 2.0.0."
@@ -167,19 +160,14 @@ function Start-PIMActivation {
                 }
                 
                 # Install/update required modules with progress tracking
-                $moduleProgress = 10
-                $moduleStep = 30 / $requiredModules.Count
+                # Initialize PIM modules with version pinning
+                Write-Verbose "Initializing PIM modules with version pinning"
+                Update-LoadingStatus -SplashForm $splashForm -Status "Initializing PIM modules..." -Progress 30
                 
-                foreach ($module in $requiredModules) {
-                    Update-LoadingStatus -SplashForm $splashForm -Status "Validating $($module.Name)..." -Progress $moduleProgress
-                    $moduleProgress += $moduleStep
-                    Start-Sleep -Milliseconds 50  # Brief pause for UI responsiveness
-                }
-                
-                $moduleResult = Install-RequiredModules -RequiredModules $requiredModules -Verbose:$script:UserVerbose
+                $moduleResult = Initialize-PIMModules -Verbose:$script:UserVerbose
                 
                 if (-not $moduleResult.Success) {
-                    throw "Module installation failed: $($moduleResult.Error)"
+                    throw "Module initialization failed: $($moduleResult.Error)"
                 }
                 
                 # Establish service connections

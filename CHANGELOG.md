@@ -16,6 +16,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1] - 2025-07-30
+
+### Added
+- **Just-in-Time Module Loading**: New `Initialize-PIMModules` system that loads modules only when needed
+- **Version Pinning**: Exact module version enforcement to prevent compatibility issues
+- **Assembly Conflict Prevention**: Automatic removal of conflicting module versions from session
+- Module loading state tracking and compatibility validation
+
+### Changed
+- **Updated Module Versions**: Now uses Microsoft.Graph 2.29.1 + Az.Accounts 5.1.0 (tested working combination)
+- Replaced legacy `Install-RequiredModules` with new `Initialize-PIMModules` function
+- Improved module initialization in `Start-PIMActivation` function
+- Updated CI/CD workflow to use latest compatible module versions
+
+### Removed
+- **Scripts Folder**: Removed compatibility testing tools (no longer needed with version pinning)
+- Legacy module installation and validation code
+- Outdated module version requirements
+
+### Fixed
+- Resolved `AuthenticateAsync` method signature compatibility issues
+- Improved module loading reliability and error handling
+- Enhanced troubleshooting guidance for version conflicts
+
+### Documentation
+- Updated troubleshooting wiki with latest version compatibility information
+- Revised module installation and conflict resolution guidance
+- Added prevention tips for maintaining module compatibility
+
+---
+
 ## [1.1.0] - 2025-07-30
 
 ### Added

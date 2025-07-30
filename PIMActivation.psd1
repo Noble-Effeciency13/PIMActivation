@@ -3,7 +3,7 @@
     RootModule = 'PIMActivation.psm1'
     
     # Version number of this module.
-    ModuleVersion = '1.1.0'
+    ModuleVersion = '1.1.1'
     
     # Supported PSEditions - Requires PowerShell Core (7+)
     CompatiblePSEditions = @('Core')
@@ -28,11 +28,11 @@
     
     # Modules that must be imported into the global environment prior to importing this module
     RequiredModules = @(
-        @{ ModuleName = 'Microsoft.Graph.Authentication'; ModuleVersion = '2.0.0' },
-        @{ ModuleName = 'Microsoft.Graph.Users'; ModuleVersion = '2.0.0' },
-        @{ ModuleName = 'Microsoft.Graph.Identity.DirectoryManagement'; ModuleVersion = '2.0.0' },
-        @{ ModuleName = 'Microsoft.Graph.Identity.Governance'; ModuleVersion = '2.0.0' },
-        @{ ModuleName = 'Az.Accounts'; ModuleVersion = '3.0.0' }
+        @{ ModuleName = 'Microsoft.Graph.Authentication'; RequiredVersion = '2.29.1' },
+        @{ ModuleName = 'Microsoft.Graph.Users'; RequiredVersion = '2.29.1' },
+        @{ ModuleName = 'Microsoft.Graph.Identity.DirectoryManagement'; RequiredVersion = '2.29.1' },
+        @{ ModuleName = 'Microsoft.Graph.Identity.Governance'; RequiredVersion = '2.29.1' },
+        @{ ModuleName = 'Az.Accounts'; RequiredVersion = '5.1.0' }
     )
     
     # Functions to export from this module
