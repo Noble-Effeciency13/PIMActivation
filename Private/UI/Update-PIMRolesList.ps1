@@ -62,6 +62,86 @@ function Update-PIMRolesList {
     }
 
     try {
+        # Check if we can use cached role data
+        $useCachedData = $false
+        $currentTime = Get-Date
+        
+        if ($script:LastRoleFetchTime -and $script:CachedEligibleRoles -and $script:CachedActiveRoles) {
+            $cacheAge = ($currentTime - $script:LastRoleFetchTime).TotalMinutes
+            if ($cacheAge -lt $script:RoleCacheValidityMinutes) {
+                $useCachedData = $true
+                Write-Verbose "Using cached role data (age: $([Math]::Round($cacheAge, 1)) minutes)"
+            } else {
+                Write-Verbose "Cache expired (age: $([Math]::Round($cacheAge, 1)) minutes), fetching fresh data"
+            }
+        } else {
+            Write-Verbose "No valid cached data available, performing fresh fetch"
+        }
+        
+        # Use batch fetching if both active and eligible roles are requested AND cache is invalid
+        $batchResult = $null
+        if (($RefreshActive -and $RefreshEligible) -and -not $useCachedData) {
+            Write-Verbose "Performing batch role and policy fetch for both active and eligible roles..."
+            
+            # Update splash screen
+            if ($SplashForm -and -not $SplashForm.IsDisposed) {
+                if ($ownSplash) {
+                    $SplashForm.UpdateStatus("Starting batch role and policy fetch...", 5)
+                } else {
+                    Update-LoadingStatus -SplashForm $SplashForm -Status "Starting batch role and policy fetch..." -Progress 5
+                }
+            }
+            
+            # Batch fetch everything
+            $batchParams = @{
+                UserId = $script:CurrentUser.Id
+                IncludeEntraRoles = $script:IncludeEntraRoles
+                IncludeGroups = $script:IncludeGroups
+                IncludeAzureResources = $script:IncludeAzureResources
+                SplashForm = $SplashForm
+            }
+            
+            $batchResult = Get-PIMRolesBatch @batchParams
+            
+            # Cache the fetched role data
+            $script:CachedEligibleRoles = $batchResult.EligibleRoles
+            $script:CachedActiveRoles = $batchResult.ActiveRoles
+            $script:LastRoleFetchTime = $currentTime
+            Write-Verbose "Cached $($batchResult.EligibleRoles.Count) eligible and $($batchResult.ActiveRoles.Count) active roles"
+            
+            # Update the script-level policy cache (merge instead of replace to maintain cache persistence)
+            if ($batchResult.Policies) {
+                $newPolicyCount = 0
+                $updatedPolicyCount = 0
+                foreach ($key in $batchResult.Policies.Keys) {
+                    if ($script:PolicyCache.ContainsKey($key)) {
+                        $script:PolicyCache[$key] = $batchResult.Policies[$key]
+                        $updatedPolicyCount++
+                    } else {
+                        $script:PolicyCache[$key] = $batchResult.Policies[$key]
+                        $newPolicyCount++
+                    }
+                }
+                Write-Verbose "Policy cache updated: $newPolicyCount new, $updatedPolicyCount updated (total: $($script:PolicyCache.Keys.Count))"
+            }
+            
+            # Update authentication context cache (merge instead of replace)
+            if ($batchResult.AuthenticationContexts) {
+                $newAuthCount = 0
+                $updatedAuthCount = 0
+                foreach ($key in $batchResult.AuthenticationContexts.Keys) {
+                    if ($script:AuthenticationContextCache.ContainsKey($key)) {
+                        $script:AuthenticationContextCache[$key] = $batchResult.AuthenticationContexts[$key]
+                        $updatedAuthCount++
+                    } else {
+                        $script:AuthenticationContextCache[$key] = $batchResult.AuthenticationContexts[$key]
+                        $newAuthCount++
+                    }
+                }
+                Write-Verbose "Auth context cache updated: $newAuthCount new, $updatedAuthCount updated (total: $($script:AuthenticationContextCache.Keys.Count))"
+            }
+        }
+        
         # Process active roles if requested
         if ($RefreshActive) {
             Write-Verbose "Refreshing active roles list"
@@ -70,9 +150,14 @@ function Update-PIMRolesList {
                 # Update splash screen progress
                 if ($SplashForm -and -not $SplashForm.IsDisposed) {
                     if ($ownSplash) {
-                        $SplashForm.UpdateStatus("Fetching active roles...", 25)
+                        $progressValue = if ($batchResult) { 96 } else { 25 }
+                        $statusMessage = if ($batchResult) { "Processing active roles..." } else { "Fetching active roles..." }
+                        $SplashForm.UpdateStatus($statusMessage, $progressValue)
                     } else {
-                        Update-LoadingStatus -SplashForm $SplashForm -Status "Fetching active roles..." -Progress 70
+                        # Continuing from Initialize-PIMForm (85%) - progress to higher values
+                        $progressValue = if ($batchResult) { 96 } else { 87 }
+                        $statusMessage = if ($batchResult) { "Processing active roles..." } else { "Fetching active roles..." }
+                        Update-LoadingStatus -SplashForm $SplashForm -Status $statusMessage -Progress $progressValue
                     }
                 }
                 
@@ -87,9 +172,18 @@ function Update-PIMRolesList {
                         # Clear existing items
                         $activeListView.Items.Clear()
                         
-                        # Retrieve active role assignments
-                        Write-Verbose "Fetching active roles from Azure"
-                        $activeRoles = Get-PIMActiveRoles
+                        # Get active roles from batch result, cached data, or individual fetch
+                        $activeRoles = if ($batchResult) {
+                            Write-Verbose "Using active roles from batch result"
+                            $batchResult.ActiveRoles
+                        } elseif ($useCachedData) {
+                            Write-Verbose "Using cached active roles data"
+                            $script:CachedActiveRoles
+                        } else {
+                            # Retrieve active role assignments using traditional method
+                            Write-Verbose "Fetching active roles from Azure (individual fetch)"
+                            Get-PIMActiveRoles
+                        }
                         
                         # Ensure we have an array to work with
                         if ($null -eq $activeRoles) {
@@ -124,18 +218,98 @@ function Update-PIMRolesList {
                                 # Column 1: Role Name
                                 $item.SubItems.Add($role.DisplayName) | Out-Null
                                 
-                                # Column 2: Resource
-                                $item.SubItems.Add($role.ResourceName) | Out-Null
+                                # Column 2: Resource - show assignment source
+                                $resourceName = "Entra ID Directory"  # Default for Entra roles
+                                if ($role.Type -eq 'Entra') {
+                                    # Check if this is scoped to an Administrative Unit
+                                    if ($role.PSObject.Properties['Scope'] -and $role.Scope -and 
+                                        $role.Scope -ne "Directory" -and $role.Scope -ne "Unknown Scope" -and
+                                        $role.Scope.StartsWith("AU: ")) {
+                                        # Administrative Unit scope - show AU name as resource
+                                        $resourceName = $role.Scope  # e.g., "AU: Finance Department"
+                                    } 
+                                    # Check if ResourceName was explicitly set by batch processing (group attribution)
+                                    elseif ($role.PSObject.Properties['ResourceName'] -and $role.ResourceName -and 
+                                            $role.ResourceName -ne "Entra ID Directory") {
+                                        $resourceName = $role.ResourceName  # e.g., "Entra ID (via Group: GroupName)"
+                                    } 
+                                    else {
+                                        # Default case - direct assignment to directory
+                                        $resourceName = "Entra ID Directory"
+                                    }
+                                } elseif ($role.Type -eq 'Group') {
+                                    # For groups, show the group name
+                                    if ($role.PSObject.Properties['ResourceName'] -and $role.ResourceName) {
+                                        $resourceName = $role.ResourceName
+                                    } else {
+                                        $resourceName = "PIM Group"
+                                    }
+                                } elseif ($role.Type -eq 'AzureResource') {
+                                    $resourceName = if ($role.PSObject.Properties['ResourceDisplayName'] -and $role.ResourceDisplayName) { 
+                                        $role.ResourceDisplayName 
+                                    } else { 
+                                        "Azure Resource" 
+                                    }
+                                }
+                                $item.SubItems.Add($resourceName) | Out-Null
                                 
-                                # Column 3: Scope
-                                $item.SubItems.Add($role.Scope) | Out-Null
+                                # Column 3: Scope - improve scope detection
+                                $scopeDisplay = "Directory"  # Default for Entra roles
+                                if ($role.Type -eq 'Entra') {
+                                    # For Entra roles, always show "Directory" 
+                                    # (AU information is now shown in Resource column)
+                                    $scopeDisplay = "Directory"
+                                } elseif ($role.Type -eq 'Group') {
+                                    # For groups, show the determined scope (Directory or AU)
+                                    if ($role.PSObject.Properties['Scope'] -and $role.Scope -and $role.Scope -ne "Group") {
+                                        $scopeDisplay = $role.Scope
+                                    } else {
+                                        $scopeDisplay = "Directory"  # Default for groups
+                                    }
+                                } elseif ($role.Type -eq 'AzureResource') {
+                                    $scopeDisplay = if ($role.PSObject.Properties['ScopeDisplayName'] -and $role.ScopeDisplayName -and $role.ScopeDisplayName -ne "Unknown Scope") {
+                                        $role.ScopeDisplayName
+                                    } else {
+                                        "Subscription/Resource"
+                                    }
+                                } else {
+                                    # Fallback: use the scope if available and not "Unknown Scope"
+                                    if ($role.PSObject.Properties['Scope'] -and $role.Scope -and $role.Scope -ne "Unknown Scope") {
+                                        $scopeDisplay = $role.Scope
+                                    }
+                                }
+                                $item.SubItems.Add($scopeDisplay) | Out-Null
                                 
-                                # Column 4: Member Type
-                                $memberType = if ($role.MemberType) { $role.MemberType } else { 'Direct' }
+                                # Column 4: Member Type - show correct role type for each context
+                                $memberType = "Direct"  # Default for Entra roles
+                                if ($role.Type -eq 'Group') {
+                                    # For groups, show Member or Owner based on AccessId
+                                    if ($role.PSObject.Properties['AccessId'] -and $role.AccessId) {
+                                        $memberType = switch ($role.AccessId.ToLower()) {
+                                            'member' { 'Member' }
+                                            'owner' { 'Owner' }
+                                            default { $role.AccessId }
+                                        }
+                                    } elseif ($role.PSObject.Properties['MemberType'] -and $role.MemberType) {
+                                        $memberType = $role.MemberType
+                                    }
+                                } elseif ($role.Type -eq 'Entra') {
+                                    # For Entra roles, show assignment method (Direct or Group)
+                                    if ($role.PSObject.Properties['MemberType'] -and $role.MemberType -and $role.MemberType -ne "Unknown") {
+                                        $memberType = $role.MemberType
+                                    }
+                                } else {
+                                    # For other types, use existing logic
+                                    if ($role.PSObject.Properties['MemberType'] -and $role.MemberType -and $role.MemberType -ne "Unknown") {
+                                        $memberType = $role.MemberType
+                                    } elseif ($role.PSObject.Properties['AssignmentType'] -and $role.AssignmentType) {
+                                        $memberType = $role.AssignmentType
+                                    }
+                                }
                                 $item.SubItems.Add($memberType) | Out-Null
                                 
                                 # Column 5: Expiration Time
-                                $expiresText = "N/A"
+                                $expiresText = "Permanent"  # Default for roles without expiration
                                 if ($role.EndDateTime) {
                                     try {
                                         # Parse the expiration time
@@ -275,9 +449,14 @@ function Update-PIMRolesList {
                 # Update splash screen progress
                 if ($SplashForm -and -not $SplashForm.IsDisposed) {
                     if ($ownSplash) {
-                        $SplashForm.UpdateStatus("Fetching eligible roles and policies...", 75)
+                        $statusMessage = if ($batchResult) { "Processing eligible roles..." } else { "Fetching eligible roles and policies..." }
+                        $progressValue = if ($batchResult) { 97 } else { 75 }
+                        $SplashForm.UpdateStatus($statusMessage, $progressValue)
                     } else {
-                        Update-LoadingStatus -SplashForm $SplashForm -Status "Fetching eligible roles and policies..." -Progress 80
+                        # Continuing from Initialize-PIMForm - progress to higher values
+                        $progressValue = if ($batchResult) { 97 } else { 90 }
+                        $statusMessage = if ($batchResult) { "Processing eligible roles..." } else { "Fetching eligible roles and policies..." }
+                        Update-LoadingStatus -SplashForm $SplashForm -Status $statusMessage -Progress $progressValue
                     }
                 }
                 
@@ -292,9 +471,20 @@ function Update-PIMRolesList {
                         # Clear existing items
                         $eligibleListView.Items.Clear()
                         
-                        # Retrieve eligible role assignments
-                        Write-Verbose "Fetching eligible roles and policies from Azure"
-                        $eligibleRoles = Get-PIMEligibleRoles
+                        # Get eligible roles from batch result, cached data, or individual fetch
+                        $eligibleRoles = if ($batchResult) {
+                            Write-Verbose "Using eligible roles from batch result"
+                            Write-Verbose "Batch result contains $($batchResult.EligibleRoles.Count) eligible roles"
+                            $batchResult.EligibleRoles
+                        } elseif ($useCachedData) {
+                            Write-Verbose "Using cached eligible roles data"
+                            Write-Verbose "Cache contains $($script:CachedEligibleRoles.Count) eligible roles"
+                            $script:CachedEligibleRoles
+                        } else {
+                            # Retrieve eligible role assignments using traditional method
+                            Write-Verbose "Fetching eligible roles and policies from Azure (individual fetch)"
+                            Get-PIMEligibleRoles
+                        }
                         
                         # Get pending requests to show which roles have pending activations
                         try {
@@ -323,7 +513,11 @@ function Update-PIMRolesList {
                         
                         # Debug: List pending request details
                         foreach ($pr in $pendingRequests) {
-                            Write-Verbose "Pending request: Type=$($pr.Type), RoleDefinitionId=$($pr.RoleDefinitionId), RoleName=$($pr.RoleName)"
+                            if ($pr.Type -eq 'Group') {
+                                Write-Verbose "Pending request: Type=$($pr.Type), GroupId=$($pr.GroupId), RoleName=$($pr.RoleName)"
+                            } else {
+                                Write-Verbose "Pending request: Type=$($pr.Type), RoleDefinitionId=$($pr.RoleDefinitionId), RoleName=$($pr.RoleName)"
+                            }
                         }
                         
                         # Ensure we have an array to work with
@@ -335,6 +529,12 @@ function Update-PIMRolesList {
                         }
                         
                         Write-Verbose "Processing $($eligibleRoles.Count) eligible roles"
+                        
+                        # Debug: Show details of first few roles
+                        for ($i = 0; $i -lt [Math]::Min(3, $eligibleRoles.Count); $i++) {
+                            $debugRole = $eligibleRoles[$i]
+                            Write-Verbose "Role $($i + 1): DisplayName='$($debugRole.DisplayName)', Type='$($debugRole.Type)', Scope='$($debugRole.Scope)'"
+                        }
                         
                         # Update splash screen with role count
                         if ($PSBoundParameters.ContainsKey('SplashForm') -and $SplashForm -and -not $SplashForm.IsDisposed) {
@@ -348,21 +548,89 @@ function Update-PIMRolesList {
                         
                         foreach ($role in $eligibleRoles) {
                             try {
-                                # Update progress for each role
+                                # Update progress for each role (simplified progress for batch results)
                                 if ($PSBoundParameters.ContainsKey('SplashForm') -and $SplashForm -and -not $SplashForm.IsDisposed -and $totalRoles -gt 0) {
                                     $currentProgress = $progressBase + [int](($itemIndex / $totalRoles) * $progressRange)
-                                    Update-LoadingStatus -SplashForm $SplashForm -Status "Fetching policy for $($role.DisplayName)..." -Progress $currentProgress
+                                    $statusMessage = if ($batchResult) { "Processing role $($role.DisplayName)..." } else { "Fetching policy for $($role.DisplayName)..." }
+                                    Update-LoadingStatus -SplashForm $SplashForm -Status $statusMessage -Progress $currentProgress
                                 }
                                 
                                 # Retrieve or use existing policy information
                                 $policyInfo = $null
-                                if ($role.PolicyInfo) {
+                                if ($role.PSObject.Properties['PolicyInfo'] -and $role.PolicyInfo) {
+                                    # Role already has policy info attached (from batch fetch)
                                     $policyInfo = $role.PolicyInfo
+                                    Write-Verbose "Using attached policy info for $($role.DisplayName)"
                                 }
                                 else {
-                                    # Fetch policy info if not already available
-                                    $policyInfo = Get-PIMRolePolicy -Role $role
+                                    # Fallback: Try cache lookup only if we don't have attached policy info
+                                    Write-Verbose "No attached policy info for $($role.DisplayName), checking cache..."
+                                    
+                                    if ($script:PolicyCache -and $script:PolicyCache.Count -gt 0) {
+                                        # Get policy from script-level cache
+                                        $roleId = if ($role.Type -eq 'Group') { 
+                                            if ($role.PSObject.Properties['GroupId']) { $role.GroupId } else { $null }
+                                        } elseif ($role.PSObject.Properties['RoleDefinitionId']) {
+                                            $role.RoleDefinitionId
+                                        } elseif ($role.PSObject.Properties['Id']) {
+                                            $role.Id
+                                        } else {
+                                            $null
+                                        }
+                                        
+                                        if ($roleId) {
+                                            $cacheKey = "Entra_$roleId"
+                                            if ($role.Type -eq 'Group') {
+                                                $cacheKey = "Group_$roleId"
+                                            }
+                                            
+                                            if ($script:PolicyCache.ContainsKey($cacheKey)) {
+                                                $policyInfo = $script:PolicyCache[$cacheKey]
+                                                Write-Verbose "Using cached policy for $($role.DisplayName) (key: $cacheKey)"
+                                            }
+                                            else {
+                                                Write-Verbose "Policy not found in cache for key: $cacheKey"
+                                                # Only fetch individually if not in a batch operation
+                                                if (-not $batchResult) {
+                                                    Write-Verbose "Fetching policy individually for $($role.DisplayName)"
+                                                    $policyInfo = Get-PIMRolePolicy -Role $role
+                                                } else {
+                                                    Write-Verbose "Skipping individual policy fetch for $($role.DisplayName) - batch operation should have provided policy"
+                                                }
+                                            }
+                                        } else {
+                                            Write-Verbose "Could not determine role ID for cache lookup: $($role.DisplayName)"
+                                            # Only fetch individually if not in a batch operation
+                                            if (-not $batchResult) {
+                                                Write-Verbose "Fetching policy individually for $($role.DisplayName)"
+                                                $policyInfo = Get-PIMRolePolicy -Role $role
+                                            } else {
+                                                Write-Verbose "Skipping individual policy fetch for $($role.DisplayName) - batch operation should have provided policy"
+                                            }
+                                        }
+                                    }
+                                    else {
+                                        # Individual fetch (fallback for partial refreshes when no cache available)
+                                        if (-not $batchResult) {
+                                            Write-Verbose "No policy cache available, fetching individually for $($role.DisplayName)"
+                                            $policyInfo = Get-PIMRolePolicy -Role $role
+                                        } else {
+                                            Write-Verbose "No policy cache and batch operation - this shouldn't happen"
+                                        }
+                                    }
                                 }
+                                
+                                # If we have cached authentication context info, enhance the policy
+                                if ($policyInfo -and $policyInfo.RequiresAuthenticationContext -and $policyInfo.AuthenticationContextId) {
+                                    if ($script:AuthenticationContextCache -and $script:AuthenticationContextCache.ContainsKey($policyInfo.AuthenticationContextId)) {
+                                        $authContext = $script:AuthenticationContextCache[$policyInfo.AuthenticationContextId]
+                                        $policyInfo.AuthenticationContextDisplayName = $authContext.DisplayName
+                                        $policyInfo.AuthenticationContextDescription = $authContext.Description
+                                        $policyInfo.AuthenticationContextDetails = $authContext
+                                    }
+                                }
+                                
+                                Write-Verbose "Creating ListView item for role: $($role.DisplayName) (Type: $($role.Type))"
                                 
                                 # Create new ListView item
                                 $item = New-Object System.Windows.Forms.ListViewItem
@@ -411,11 +679,86 @@ function Update-PIMRolesList {
                                 
                                 $item.Text = "$typePrefix $($role.DisplayName)"
                                 
-                                # Column 1: Scope
-                                $item.SubItems.Add($role.Scope) | Out-Null
+                                # Column 1: Scope - show permission scope level (Directory, AU, or Group)
+                                $scopeDisplay = "Directory"  # Default for Entra roles
+                                if ($role.Type -eq 'Entra') {
+                                    # For Entra roles, show the scope where permissions apply
+                                    if ($role.PSObject.Properties['DirectoryScopeId'] -and $role.DirectoryScopeId) {
+                                        # Use the DirectoryScopeId to determine scope
+                                        if ($role.DirectoryScopeId -eq '/' -or [string]::IsNullOrEmpty($role.DirectoryScopeId)) {
+                                            $scopeDisplay = "Directory"
+                                        } elseif ($role.DirectoryScopeId -like '/administrativeUnits/*') {
+                                            # Try to get AU display name from Scope property first
+                                            if ($role.PSObject.Properties['Scope'] -and $role.Scope -and $role.Scope.StartsWith('AU: ')) {
+                                                $scopeDisplay = $role.Scope
+                                            } else {
+                                                # Fallback to AU ID
+                                                $auId = $role.DirectoryScopeId -replace '^/administrativeUnits/', ''
+                                                $scopeDisplay = "AU: $auId"
+                                            }
+                                        } else {
+                                            # Other scopes - use Scope property if available
+                                            if ($role.PSObject.Properties['Scope'] -and $role.Scope -and $role.Scope -ne "Unknown Scope") {
+                                                $scopeDisplay = $role.Scope
+                                            } else {
+                                                $scopeDisplay = "Directory"
+                                            }
+                                        }
+                                    } else {
+                                        # Fallback to Scope property
+                                        if ($role.PSObject.Properties['Scope'] -and $role.Scope -and $role.Scope -ne "Unknown Scope") {
+                                            $scopeDisplay = $role.Scope
+                                        } else {
+                                            $scopeDisplay = "Directory"
+                                        }
+                                    }
+                                } elseif ($role.Type -eq 'Group') {
+                                    # For groups, show the determined scope (Directory or AU)
+                                    if ($role.PSObject.Properties['Scope'] -and $role.Scope -and $role.Scope -ne "Group") {
+                                        $scopeDisplay = $role.Scope
+                                    } else {
+                                        $scopeDisplay = "Directory"  # Default for groups
+                                    }
+                                } elseif ($role.Type -eq 'AzureResource') {
+                                    $scopeDisplay = if ($role.PSObject.Properties['ScopeDisplayName'] -and $role.ScopeDisplayName -and $role.ScopeDisplayName -ne "Unknown Scope") {
+                                        $role.ScopeDisplayName
+                                    } else {
+                                        "Subscription/Resource"
+                                    }
+                                } else {
+                                    # Fallback: use the scope if available and not "Unknown Scope"
+                                    if ($role.PSObject.Properties['Scope'] -and $role.Scope -and $role.Scope -ne "Unknown Scope") {
+                                        $scopeDisplay = $role.Scope
+                                    }
+                                }
+                                $item.SubItems.Add($scopeDisplay) | Out-Null
                                 
-                                # Column 2: MemberType
-                                $memberType = if ($role.MemberType) { $role.MemberType } else { 'Direct' }
+                                # Column 2: MemberType - show correct role type for each context
+                                $memberType = "Direct"  # Default for Entra roles
+                                if ($role.Type -eq 'Group') {
+                                    # For groups, show Member or Owner based on AccessId
+                                    if ($role.PSObject.Properties['AccessId'] -and $role.AccessId) {
+                                        $memberType = switch ($role.AccessId.ToLower()) {
+                                            'member' { 'Member' }
+                                            'owner' { 'Owner' }
+                                            default { $role.AccessId }
+                                        }
+                                    } elseif ($role.PSObject.Properties['MemberType'] -and $role.MemberType) {
+                                        $memberType = $role.MemberType
+                                    }
+                                } elseif ($role.Type -eq 'Entra') {
+                                    # For Entra roles, show assignment method (Direct or Group)
+                                    if ($role.PSObject.Properties['MemberType'] -and $role.MemberType -and $role.MemberType -ne "Unknown") {
+                                        $memberType = $role.MemberType
+                                    }
+                                } else {
+                                    # For other types, use existing logic
+                                    if ($role.PSObject.Properties['MemberType'] -and $role.MemberType -and $role.MemberType -ne "Unknown") {
+                                        $memberType = $role.MemberType
+                                    } elseif ($role.PSObject.Properties['AssignmentType'] -and $role.AssignmentType) {
+                                        $memberType = $role.AssignmentType
+                                    }
+                                }
                                 $item.SubItems.Add($memberType) | Out-Null
 
                                 # Column 3: Maximum activation duration
@@ -476,11 +819,15 @@ function Update-PIMRolesList {
                                 $item.Tag = $roleWithPolicy
                                 
                                 # Add item to ListView
+                                Write-Verbose "Adding ListView item for: $($role.DisplayName)"
                                 $eligibleListView.Items.Add($item) | Out-Null
+                                Write-Verbose "Successfully added item $($itemIndex + 1) for: $($role.DisplayName)"
                                 $itemIndex++
                             }
                             catch {
                                 Write-Warning "Failed to add eligible role '$($role.DisplayName)' to list: $_"
+                                Write-Verbose "Exception details: $($_.Exception.Message)"
+                                Write-Verbose "Stack trace: $($_.ScriptStackTrace)"
                             }
                         }
                     }
@@ -568,7 +915,9 @@ function Update-PIMRolesList {
                 $SplashForm.UpdateStatus("Role data loaded successfully!", 100)
                 Start-Sleep -Milliseconds 500
             } else {
-                Update-LoadingStatus -SplashForm $SplashForm -Status "Role data loaded successfully!" -Progress 98
+                Update-LoadingStatus -SplashForm $SplashForm -Status "Initialization complete!" -Progress 100
+                Start-Sleep -Milliseconds 500
+                Close-LoadingSplash -SplashForm $SplashForm
             }
         }
     }    

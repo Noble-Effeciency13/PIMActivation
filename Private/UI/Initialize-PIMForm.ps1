@@ -493,6 +493,12 @@ function Initialize-PIMForm {
         $btnRefresh.Add_Click({
             Write-Verbose "Refresh button clicked"
             
+            # Clear role cache to force fresh data retrieval on manual refresh
+            Write-Verbose "Clearing role cache to ensure fresh data on manual refresh"
+            $script:CachedEligibleRoles = @()
+            $script:CachedActiveRoles = @()
+            $script:LastRoleFetchTime = $null
+            
             # Show operation splash
             $refreshSplash = Show-OperationSplash -Title "Refreshing Roles" -InitialMessage "Updating role information..." -ShowProgressBar $true
             
@@ -554,18 +560,14 @@ function Initialize-PIMForm {
         # Load role lists and update splash progress
         try {
             if ($SplashForm -and -not $SplashForm.IsDisposed) {
-                Update-LoadingStatus -SplashForm $SplashForm -Status "Loading role data..." -Progress 65
+                Update-LoadingStatus -SplashForm $SplashForm -Status "Loading role data..." -Progress 85
             }
             
-            # Load role data with progress updates
+            # Load role data with progress updates (this will continue from 85% to 100%)
             $null = Update-PIMRolesList -Form $form -RefreshEligible -RefreshActive -SplashForm $SplashForm
             
-            # Complete initialization
-            if ($SplashForm -and -not $SplashForm.IsDisposed) {
-                Update-LoadingStatus -SplashForm $SplashForm -Status "Initialization complete!" -Progress 100
-                Start-Sleep -Milliseconds 500
-                Close-LoadingSplash -SplashForm $SplashForm
-            }
+            # Complete initialization - this is handled by Update-PIMRolesList now
+            # No need to duplicate the final progress update here
         }
         catch {
             # Handle role loading errors gracefully

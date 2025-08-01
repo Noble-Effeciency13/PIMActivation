@@ -30,8 +30,13 @@ function Clear-PIMPolicyCache {
     # Clear authentication context cache
     $script:AuthenticationContextCache = @{}
     
+    # Clear role caches
+    $script:CachedEligibleRoles = @()
+    $script:CachedActiveRoles = @()
+    $script:LastRoleFetchTime = $null
+    
     # Reset Entra policies loaded flag
     $script:EntraPoliciesLoaded = $false
     
-    Write-Verbose "PIM caches cleared: PolicyCache, AuthenticationContextCache, and EntraPoliciesLoaded flag reset"
+    Write-Verbose "PIM caches cleared: PolicyCache, AuthenticationContextCache, RoleCaches, and EntraPoliciesLoaded flag reset"
 }

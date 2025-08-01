@@ -510,7 +510,13 @@ function Invoke-PIMRoleActivation {
         # Add delay after successful activations to allow Microsoft Graph to process changes
         if ($successCount -gt 0) {
             Write-Verbose "Waiting for Microsoft Graph to process role changes..."
-            Start-Sleep -Seconds 1
+            Start-Sleep -Seconds 3  # Increased initial delay
+            
+            # Clear role cache to ensure fresh data is fetched after activation
+            Write-Verbose "Clearing role cache to force fresh data retrieval after activation"
+            $script:CachedEligibleRoles = @()
+            $script:CachedActiveRoles = @()
+            $script:LastRoleFetchTime = $null
         }
         
         Write-Verbose "Refreshing role data"
@@ -523,7 +529,13 @@ function Invoke-PIMRoleActivation {
             try {
                 if ($refreshAttempts -gt 1) {
                     Write-Verbose "Refresh attempt $refreshAttempts of $maxRefreshAttempts after waiting for Graph propagation..."
-                    Start-Sleep -Seconds 5
+                    Start-Sleep -Seconds 3  # Reduced retry delay but still adequate
+                    
+                    # Clear cache again before retry to ensure fresh data
+                    Write-Verbose "Clearing role cache before retry attempt"
+                    $script:CachedEligibleRoles = @()
+                    $script:CachedActiveRoles = @()
+                    $script:LastRoleFetchTime = $null
                 }
                 
                 Update-PIMRolesList -Form $Form -RefreshActive -RefreshEligible

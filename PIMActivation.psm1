@@ -43,6 +43,23 @@ if (-not (Test-Path Variable:script:EntraPoliciesLoaded)) {
     $script:EntraPoliciesLoaded = $false
 }
 
+# Role data cache to avoid repeated API calls during refresh operations
+if (-not (Test-Path Variable:script:CachedEligibleRoles)) {
+    $script:CachedEligibleRoles = @()
+}
+
+if (-not (Test-Path Variable:script:CachedActiveRoles)) {
+    $script:CachedActiveRoles = @()
+}
+
+if (-not (Test-Path Variable:script:LastRoleFetchTime)) {
+    $script:LastRoleFetchTime = $null
+}
+
+if (-not (Test-Path Variable:script:RoleCacheValidityMinutes)) {
+    $script:RoleCacheValidityMinutes = 5  # Cache roles for 5 minutes
+}
+
 # Authentication context variables - now supporting multiple contexts
 $script:CurrentAuthContextToken = $null  # Deprecated - kept for backwards compatibility
 $script:AuthContextTokens = @{}  # New: Hashtable of contextId -> token

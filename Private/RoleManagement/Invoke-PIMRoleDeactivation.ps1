@@ -76,12 +76,15 @@ function Invoke-PIMRoleDeactivation {
                         }
                         else {
                             # Query for the active schedule
-                            $activeSchedules = Get-MgRoleManagementDirectoryRoleAssignmentSchedule -Filter "principalId eq '$($script:CurrentUser.Id)' and roleDefinitionId eq '$($roleData.RoleDefinitionId)'"
-                            if ($activeSchedules) {
+                            Write-Verbose "Querying for active role assignment schedules for RoleDefinitionId: $($roleData.RoleDefinitionId)"
+                            $activeSchedules = @(Get-MgRoleManagementDirectoryRoleAssignmentSchedule -Filter "principalId eq '$($script:CurrentUser.Id)' and roleDefinitionId eq '$($roleData.RoleDefinitionId)'" -ErrorAction SilentlyContinue)
+                            
+                            if ($activeSchedules -and $activeSchedules.Count -gt 0) {
+                                Write-Verbose "Found $($activeSchedules.Count) active schedule(s), using first one: $($activeSchedules[0].Id)"
                                 $requestBody.roleAssignmentScheduleId = $activeSchedules[0].Id
                             }
                             else {
-                                throw "Could not find active assignment schedule for deactivation"
+                                throw "Could not find active assignment schedule for deactivation of role: $($roleData.DisplayName)"
                             }
                         }
                         
@@ -93,6 +96,13 @@ function Invoke-PIMRoleDeactivation {
                     }
                     
                     'Group' {
+                        Write-Verbose "Processing group deactivation for GroupId: $($roleData.GroupId)"
+                        
+                        # Validate required group data
+                        if (-not $roleData.GroupId) {
+                            throw "Missing GroupId for group role deactivation: $($roleData.DisplayName)"
+                        }
+                        
                         $groupRequestBody = @{
                             principalId = $script:CurrentUser.Id
                             groupId = $roleData.GroupId
@@ -107,9 +117,15 @@ function Invoke-PIMRoleDeactivation {
                         }
                         else {
                             # Query for the active schedule
-                            $activeSchedules = Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentSchedule -Filter "principalId eq '$($script:CurrentUser.Id)' and groupId eq '$($roleData.GroupId)'"
-                            if ($activeSchedules) {
+                            Write-Verbose "Querying for active group assignment schedules for GroupId: $($roleData.GroupId)"
+                            $activeSchedules = @(Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentSchedule -Filter "principalId eq '$($script:CurrentUser.Id)' and groupId eq '$($roleData.GroupId)'" -ErrorAction SilentlyContinue)
+                            
+                            if ($activeSchedules -and $activeSchedules.Count -gt 0) {
+                                Write-Verbose "Found $($activeSchedules.Count) active schedule(s), using first one: $($activeSchedules[0].Id)"
                                 $groupRequestBody.assignmentScheduleId = $activeSchedules[0].Id
+                            }
+                            else {
+                                throw "Could not find active assignment schedule for group deactivation: $($roleData.DisplayName). The group role may not be currently active or may have been assigned through a different mechanism."
                             }
                         }
                         
@@ -144,6 +160,17 @@ function Invoke-PIMRoleDeactivation {
         
         # Refresh role lists
         $operationSplash.UpdateStatus("Refreshing role lists...", 98)
+        
+        # Clear role cache to ensure fresh data is fetched after deactivation
+        if ($successCount -gt 0) {
+            Write-Verbose "Waiting for Microsoft Graph to process deactivation changes..."
+            Start-Sleep -Seconds 3  # Add delay for Graph propagation
+            
+            Write-Verbose "Clearing role cache to force fresh data retrieval after deactivation"
+            $script:CachedEligibleRoles = @()
+            $script:CachedActiveRoles = @()
+            $script:LastRoleFetchTime = $null
+        }
         
         try {
             Update-PIMRolesList -Form $Form -RefreshActive -RefreshEligible

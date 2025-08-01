@@ -13,11 +13,14 @@ LONG DESCRIPTION
 
     Key Features:
     - Graphical user interface for easy role management
+    - High-performance batch API operations for fast role loading
+    - Intelligent duplicate role handling with group attribution
     - Support for Entra ID directory roles
     - Support for PIM-enabled security groups
     - Optional support for Azure resource roles
     - Multi-select capability for bulk activations
     - Configurable activation duration (1-24 hours)
+    - Group-role relationship visibility and attribution
     - Automatic handling of policy requirements:
       * Multi-factor authentication (MFA)
       * Justification text
@@ -26,6 +29,7 @@ LONG DESCRIPTION
       * Approval workflows
     - Real-time view of active and eligible roles
     - Account switching without restarting
+    - Enhanced cache management with proper invalidation
 
 EXAMPLES
     # Launch with default settings (Entra roles and Groups)

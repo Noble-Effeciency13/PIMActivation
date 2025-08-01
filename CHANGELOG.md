@@ -15,6 +15,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2025-07-31
+
+### Added
+- **Batch Role Fetching**: New `Get-PIMRolesBatch` function that retrieves all roles and policies in optimized batch operations (85% reduction in API calls)
+- **Batch Policy Processing**: New `Get-PIMPoliciesBatch` function that fetches multiple role policies simultaneously
+- **Advanced Duplicate Role Handling**: Sophisticated MemberType-based classification system (Direct vs Group vs Inherited) for managing multiple instances of same role
+- **Intelligent Group Attribution Algorithm**: Smart matching logic with unused group preference preventing overcorrection issues in duplicate role scenarios
+- **MemberType Detection System**: Precise identification of role assignment sources using Microsoft Graph MemberType field ('Direct', 'Group', 'Inherited')
+- **Group-Role Attribution System**: ProvidedRoles functionality showing which roles each group membership provides with cross-referencing validation
+- **Enhanced Cross-Referencing**: Sophisticated logic for matching group-derived Entra roles with their providing groups using expiration correlation
+- **Priority-Based Role Distribution**: Advanced algorithm distributing multiple inherited roles across respective providing groups
+- **Advanced Array Handling**: @() wrapper implementation preventing .Count property errors in PowerShell
+- **Safe Property Access**: PSObject.Properties pattern for bulletproof property checking
+- **Enhanced Verbose Logging**: Detailed progress tracking with differentiated handling for groups vs Entra roles and attribution decisions
+
+### Changed
+- **Performance Enhancement**: Role loading now uses batch API operations instead of individual calls, significantly reducing load times
+- **Improved UI Responsiveness**: Batch processing provides better progress feedback and faster role list population
+- **Optimized Policy Retrieval**: Policies are now fetched once and cached for all applicable roles
+- **Smooth Progress Flow**: Coordinated progress tracking across all loading phases (86%-98% range)
+- **Enhanced Resource Display**: Shows "Entra ID (via Group: GroupName)" for group-derived roles
+- **Proper Expiration Attribution**: Duplicate roles now show individual expiration times based on their providing groups
+
+### Fixed
+- **Cache Refresh Issues**: Resolved active roles not updating immediately after activation/deactivation
+- **Progress Bar Jumps**: Fixed backwards progress jumps from 60% to 10% during initialization
+- **Property Access Errors**: Comprehensive error handling for .Count, RoleDefinitionId, and EndDateTime properties
+- **Group Visibility**: Enhanced cross-referencing logic for proper group-role relationship display
+- **Duplicate Role Overcorrection**: Fixed issue where direct assignments were incorrectly attributed to groups when duplicates existed
+- **AI Administrator Attribution Bug**: Resolved overcorrection causing both direct and group-derived AI Administrator roles to show group attribution
+- **Helpdesk Administrator Distribution**: Fixed attribution issue where multiple Helpdesk Administrator roles from different groups were all attributed to same group
+- **MemberType Classification**: Corrected detection logic to properly distinguish MemberType 'Group' vs 'Direct' vs 'Inherited' assignments
+- **Single Direct Role Logic**: Enhanced logic to only apply group attribution when no inherited roles of same type exist
+- **Defensive Coding**: Comprehensive try-catch blocks around all critical operations preventing crashes
+
+### Technical
+- **MemberType-Based Classification**: Sophisticated detection algorithm using Microsoft Graph MemberType field for accurate role source identification
+- **Unused Group Preference Algorithm**: Smart attribution logic preferring unused groups for inherited role distribution across multiple providing groups
+- **Overcorrection Prevention**: Enhanced single direct role logic preventing incorrect group attribution when inherited duplicates exist
+- **Priority-Based Group Assignment**: Sophisticated matching logic with temporal vs permanent preferences and expiration correlation
+- **Intelligent Caching**: Enhanced cache invalidation system with proper timing coordination
+- **Comprehensive Error Handling**: Bulletproof property access protection preventing common PowerShell errors
+- **Cross-Reference Validation**: Extensive debugging for group-role relationship verification and duplicate role scenarios
+
+---
+
 ## [1.1.1] - 2025-07-30
 
 ### Added

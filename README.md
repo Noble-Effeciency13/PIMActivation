@@ -18,12 +18,21 @@ A comprehensive PowerShell module for managing Microsoft Entra ID Privileged Ide
 - 🎨 **Modern GUI Interface** - Clean, responsive Windows Forms application with real-time updates
 - 🔐 **Multi-Role Support** - Activate Microsoft Entra ID roles and PIM-enabled security groups
 - ⚡ **Bulk Operations** - Select and activate multiple roles simultaneously with policy validation
+- 🚀 **High-Performance Batch API** - 85% reduction in API calls through intelligent batching and caching
+- 🎯 **Advanced Duplicate Role Handling** - Sophisticated MemberType-based classification system for managing roles with multiple assignment paths
 - 🛡️ **Authentication Context Support** - Seamless handling of Conditional Access authentication context requirements
 - ⏱️ **Flexible Duration** - Configurable activation periods from 1 hour to policy maximum (typically 8-24 hours)
 - 📋 **Policy Compliance** - Automatic detection and handling of MFA, justification, and ticket requirements
 - 🔄 **Real-time Monitoring** - Live view of active assignments and pending requests
 - 👤 **Account Management** - Easy account switching without application restart
 - 🔧 **PowerShell Compatibility** - Requires PowerShell 7+ for optimal performance and modern language features
+
+## 📸 Screenshots
+
+### Main Interface
+![PIM Activation Main Interface](https://github.com/user-attachments/assets/27557d5b-9060-45b4-bd61-dbccb96b6493)
+
+*The main PIM activation interface showing eligible roles, active assignments, and activation options with policy requirements. Features intelligent group-role attribution, advanced duplicate role handling with MemberType classification, and smooth progress tracking with batch API performance enhancements.*
 
 ## 🚀 Quick Start
 
@@ -63,11 +72,11 @@ On first launch, you'll be prompted to authenticate with Microsoft Graph using y
 
 ### Required PowerShell Modules
 The following modules will be automatically installed if missing:
-- `Microsoft.Graph.Authentication` (2.0+)
+- `Microsoft.Graph.Authentication` (2.9+)
 - `Microsoft.Graph.Users`
 - `Microsoft.Graph.Identity.DirectoryManagement`
 - `Microsoft.Graph.Identity.Governance`
-- `Az.Accounts` (3.0+) - provides WAM authentication support
+- `Az.Accounts` (5.1+) - provides WAM authentication support
 
 ### Microsoft Entra ID Permissions
 Your account needs the following **delegated** permissions:
@@ -136,7 +145,7 @@ Get-MgContext
 Disconnect-MgGraph
 ```
 
-## � Supported Role Types
+## 📊 Supported Role Types
 
 | Role Type | Support Status | Notes |
 |-----------|---------------|-------|
