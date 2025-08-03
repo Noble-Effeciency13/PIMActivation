@@ -7,7 +7,7 @@
 
 A comprehensive PowerShell module for managing Microsoft Entra ID Privileged Identity Management (PIM) role activations through an intuitive graphical interface. Streamline your privileged access workflows with support for authentication context, bulk activations, and policy compliance.
 
-> 📖 **Read the full blog post**: [Microsoft Entra PIM Bulk Role Activation Tool](https://www.chanceofsecurity.com/post/microsoft-entra-pim-bulk-role-activation-tool) on [Chance of Security](https://www.chanceofsecurity.com/)
+> 📖 **Read the full blog post**: [PIMActivation: The Ultimate Tool for Microsoft Entra PIM Bulk Role Activation](https://www.chanceofsecurity.com/post/microsoft-entra-pim-bulk-role-activation-tool) on [Chance of Security](https://www.chanceofsecurity.com/)
 
 ![PIM Activation Interface](https://img.shields.io/badge/GUI-Windows%20Forms-blue?style=flat-square)
 ![PowerShell](https://img.shields.io/badge/PowerShell-7%2B-blue?style=flat-square)
@@ -21,9 +21,9 @@ A comprehensive PowerShell module for managing Microsoft Entra ID Privileged Ide
 - 🚀 **High-Performance Batch API** - 85% reduction in API calls through intelligent batching and caching
 - 🎯 **Advanced Duplicate Role Handling** - Sophisticated MemberType-based classification system for managing roles with multiple assignment paths
 - 🛡️ **Authentication Context Support** - Seamless handling of Conditional Access authentication context requirements
-- ⏱️ **Flexible Duration** - Configurable activation periods from 1 hour to policy maximum (typically 8-24 hours)
+- ⏱️ **Flexible Duration** - Configurable activation periods from 30 minutes to 24 hours, depending on policy maximum
 - 📋 **Policy Compliance** - Automatic detection and handling of MFA, justification, and ticket requirements
-- 🔄 **Real-time Monitoring** - Live view of active assignments and pending requests
+- 🔄 **Up-to-Date Snapshot** - Shows current active and pending assignments based on the latest refresh or user action
 - 👤 **Account Management** - Easy account switching without application restart
 - 🔧 **PowerShell Compatibility** - Requires PowerShell 7+ for optimal performance and modern language features
 
@@ -95,8 +95,6 @@ Your account needs the following **delegated** permissions:
 - `User.Read`
 - `Policy.Read.ConditionalAccess` (for authentication context support)
 
-> **Note:** These permissions are typically granted through PIM role assignments like "Privileged Role Administrator" or "Global Administrator".
-
 ## 💡 Usage Examples
 
 ### Basic Operations
@@ -109,9 +107,6 @@ Start-PIMActivation -IncludeEntraRoles
 
 # Show only PIM-enabled security groups
 Start-PIMActivation -IncludeGroups
-
-# Force account selection dialog
-Start-PIMActivation -ForceNewAccount
 ```
 
 ### Advanced Scenarios
@@ -121,20 +116,22 @@ Start-PIMActivation -ForceNewAccount
 
 # For bulk activations
 # 1. Launch Start-PIMActivation
-# 2. Use Ctrl+Click to select multiple roles
-# 3. Click "Activate Selected Roles"
-# 4. Set duration and justification
-# 5. Complete any required authentication challenges
+# 2. Select multiple roles
+# 3. Set duration
+# 4. Click "Activate Roles"
+# 5. Fill out justification, and ticket info if required
+# 6. Complete any required authentication challenges
 ```
 
 ## 🔧 Configuration
 
 ### Authentication Context Support
-The module automatically detects and handles authentication context requirements from Conditional Access policies. When a role requires additional authentication (like privileged access workstations), the module will:
+The module automatically detects and handles authentication context requirements from Conditional Access policies. When a role requires additional authentication, the module will:
 
-1. Detect the authentication context requirement
-2. Acquire the appropriate token with correct claims
-3. Handle the activation seamlessly
+1. Detect the authentication context requirement for each selected roles
+2. Group roles by context ID
+3. Prompt re-authentication pr. context ID, utilizing WAM
+4. Handle the activation seamlessly
 
 ### Module Settings
 ```powershell
@@ -163,7 +160,7 @@ Disconnect-MgGraph
 Disconnect-MgGraph
 
 # Restart with fresh authentication
-Start-PIMActivation -ForceNewAccount
+Start-PIMActivation
 ```
 
 **PowerShell Version Issues**
@@ -192,7 +189,7 @@ Start-PIMActivation -Verbose
 
 ### Version 2.0.0 (Planned)
 - **Azure Resource Roles**: Support for Azure subscription and resource-level PIM roles
-- **Profile Management**: Save and quickly activate frequently used role combinations
+- **Profile Management**: Save and quickly activate frequently used role and account combinations
 - **Scheduling**: Plan role activations for future times
 - **Reporting**: Built-in activation history and analytics
 
