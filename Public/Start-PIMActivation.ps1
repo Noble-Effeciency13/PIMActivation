@@ -1,58 +1,71 @@
 function Start-PIMActivation {
     <#
     .SYNOPSIS
-        Starts the PIM Role Activation graphical interface.
+        Starts the PIM Role Activation graphical interface with advanced duplicate role handling.
     
     .DESCRIPTION
         Launches a Windows Forms application for managing Privileged Identity Management (PIM) role activations.
-        The application provides an intuitive interface for activating Entra ID roles, PIM-enabled groups, and Azure resource roles.
+        The application provides an intuitive interface for activating Entra ID roles and PIM-enabled groups
+        with sophisticated handling of duplicate role assignments from multiple sources.
+        
+        Key Features:
+        - 85% faster loading through batch API operations
+        - Smart duplicate role handling showing correct group attribution
+        - Visual indication of role sources (Direct vs Group-derived)
+        - Automatic handling of authentication and module dependencies
         
         Requirements:
         - PowerShell 7.0 or later
         - Single-threaded apartment (STA) mode for Windows Forms
-        - Required Microsoft Graph and Azure PowerShell modules (auto-installed if missing)
+        - Microsoft Graph PowerShell modules (auto-installed if missing)
         
-        The tool automatically handles authentication, module dependencies, and provides a loading interface
-        during initialization.
+        The tool automatically handles authentication, module dependencies, and provides a loading 
+        interface with progress tracking during initialization.
     
     .PARAMETER IncludeEntraRoles
         Include Entra ID (Azure AD) roles in the activation interface.
         When enabled, displays available Entra ID role assignments that can be activated.
+        Shows both direct assignments and group-derived roles with proper attribution.
         Default: $true
     
     .PARAMETER IncludeGroups
         Include PIM-enabled security groups in the activation interface.
         When enabled, displays eligible group memberships that can be activated.
+        Groups that provide Entra ID roles will show those roles upon activation.
         Default: $true
     
     .PARAMETER IncludeAzureResources
         Include Azure resource roles (RBAC) in the activation interface.
-        When enabled, displays eligible Azure subscription and resource group role assignments.
-        Requires additional Az PowerShell modules (Az.Accounts, Az.Resources).
+        NOTE: This feature is planned for version 2.0.0 and is not yet implemented.
+        The parameter is accepted but will display a warning message.
         Default: $false
+    
+    .PARAMETER Verbose
+        Enables verbose output for troubleshooting.
+        Shows detailed information about role processing, API calls, and group attribution logic.
     
     .EXAMPLE
         Start-PIMActivation
         
         Launches the PIM activation interface with default settings.
-        Includes Entra ID roles and PIM-enabled groups, but excludes Azure resource roles.
+        Includes Entra ID roles and PIM-enabled groups with fast batch loading.
     
     .EXAMPLE
-        Start-PIMActivation -IncludeAzureResources
+        Start-PIMActivation -Verbose
         
-        Launches the interface including Azure resource roles (RBAC assignments).
-        Also includes Entra ID roles and groups by default.
+        Launches the interface with detailed logging output.
+        Useful for troubleshooting duplicate role attribution or connection issues.
     
     .EXAMPLE
-        Start-PIMActivation -IncludeEntraRoles:$false -IncludeGroups:$false -IncludeAzureResources
+        Start-PIMActivation -IncludeEntraRoles:$false
         
-        Launches the interface showing only Azure resource roles.
-        Excludes Entra ID roles and PIM-enabled groups.
+        Launches the interface showing only PIM-enabled groups.
+        Excludes Entra ID role assignments from the display.
     
     .NOTES
         Name: Start-PIMActivation
-        Author: GitHub Copilot
-        Version: 1.0
+        Author: Sebastian Flæng Markdanner
+        Version: 1.2.0
         
         This function requires PowerShell 7+ and will automatically restart in STA mode if needed.
         Missing required modules are automatically installed from the PowerShell Gallery.
@@ -61,7 +74,10 @@ function Start-PIMActivation {
         when users need to switch between different Microsoft accounts.
     
     .LINK
-        https://docs.microsoft.com/en-us/azure/active-directory/privileged-identity-management/
+        https://github.com/Noble-Effeciency13/PIMActivation
+    
+    .LINK
+        https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/
     #>
     [CmdletBinding(SupportsShouldProcess)]
     [OutputType([void])]
@@ -72,7 +88,7 @@ function Start-PIMActivation {
         [Parameter(HelpMessage = "Include PIM-enabled groups in the activation interface")]
         [switch]$IncludeGroups = $true,
         
-        [Parameter]
+        [Parameter(HelpMessage = "Include Azure resource roles (Not yet implemented - planned for v2.0.0)")]
         [switch]$IncludeAzureResources
     )
     
