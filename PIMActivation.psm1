@@ -1,32 +1,4 @@
 #Requires -Version 7.0
-#Requires -Modules @{
-    ModuleName = 'Microsoft.Graph.Authentication'
-    ModuleVersion = '2.29.0'
-}
-#Requires -Modules @{
-    ModuleName = 'Microsoft.Graph.Users'
-    ModuleVersion = '2.29.0'
-}
-#Requires -Modules @{
-    ModuleName = 'Microsoft.Graph.Identity.DirectoryManagement'
-    ModuleVersion = '2.29.0'
-}
-#Requires -Modules @{
-    ModuleName = 'Microsoft.Graph.Identity.Governance'
-    ModuleVersion = '2.29.0'
-}
-#Requires -Modules @{
-    ModuleName = 'Microsoft.Graph.Groups'
-    ModuleVersion = '2.29.0'
-}
-#Requires -Modules @{
-    ModuleName = 'Microsoft.Graph.Identity.SignIns'
-    ModuleVersion = '2.29.0'
-}
-#Requires -Modules @{
-    ModuleName = 'Az.Accounts'
-    ModuleVersion = '5.1.0'
-}
 
 # Set strict mode for better error handling
 Set-StrictMode -Version Latest
@@ -97,12 +69,10 @@ $script:AuthContextCompletionTime = $null
 # Module loading state for just-in-time loading
 $script:ModuleLoadingState = @{}
 $script:RequiredModuleVersions = @{
-    'Microsoft.Graph.Authentication' = '2.29.0'
-    'Microsoft.Graph.Users' = '2.29.0'
-    'Microsoft.Graph.Identity.DirectoryManagement' = '2.29.0'
-    'Microsoft.Graph.Identity.Governance' = '2.29.0'
-    'Microsoft.Graph.Groups' = '2.29.0'
-    'Microsoft.Graph.Identity.SignIns' = '2.29.0'
+    'Microsoft.Graph.Authentication' = '2.29.1'
+    'Microsoft.Graph.Users' = '2.29.1'
+    'Microsoft.Graph.Identity.DirectoryManagement' = '2.29.1'
+    'Microsoft.Graph.Identity.Governance' = '2.29.1'
     'Az.Accounts' = '5.1.0'
 }
 
@@ -111,29 +81,26 @@ $script:RequiredModuleVersions = @{
 #region Import Functions
 
 # Import all functions from subdirectories
-$functionFolders = [System.Collections.ArrayList]::new()
-$null = $functionFolders.AddRange(@(
+$functionFolders = @(
     'Authentication',
     'RoleManagement', 
     'UI',
     'Utilities'
-))
+)
 
 # Note: Profiles folder contains placeholder functions for planned features
-$null = $functionFolders.Add('Profiles')
+$functionFolders += 'Profiles'
 
 # Import private functions from organized folders
-# Temporarily suppress verbose output during function imports to reduce noise
-$originalVerbosePreference = $VerbosePreference
-$VerbosePreference = 'SilentlyContinue'
-
 foreach ($folder in $functionFolders) {
     $folderPath = Join-Path -Path "$script:ModuleRoot\Private" -ChildPath $folder
     if (Test-Path -Path $folderPath) {
+        Write-Verbose "Importing functions from $folder"
         $functions = Get-ChildItem -Path $folderPath -Filter '*.ps1' -File -ErrorAction SilentlyContinue
         
         foreach ($function in $functions) {
             try {
+                Write-Verbose "Importing $($function.Name)"
                 . $function.FullName
             }
             catch {
@@ -147,6 +114,7 @@ foreach ($folder in $functionFolders) {
 $privateRoot = Get-ChildItem -Path "$script:ModuleRoot\Private" -Filter '*.ps1' -File -ErrorAction SilentlyContinue
 foreach ($import in $privateRoot) {
     try {
+        Write-Verbose "Importing $($import.Name)"
         . $import.FullName
     }
     catch {
@@ -158,15 +126,13 @@ foreach ($import in $privateRoot) {
 $Public = @(Get-ChildItem -Path "$script:ModuleRoot\Public" -Filter '*.ps1' -File -ErrorAction SilentlyContinue)
 foreach ($import in $Public) {
     try {
+        Write-Verbose "Importing public function $($import.Name)"
         . $import.FullName
     }
     catch {
         Write-Error -Message "Failed to import function $($import.FullName): $_"
     }
 }
-
-# Restore original verbose preference
-$VerbosePreference = $originalVerbosePreference
 
 #endregion Import Functions
 
@@ -176,14 +142,6 @@ $VerbosePreference = $originalVerbosePreference
 Export-ModuleMember -Function $Public.BaseName -Alias *
 
 #endregion Export Module Members
-
-#region Module Initialization
-
-# Dependencies are loaded on-demand when Start-PIMActivation is called
-# This ensures clean module loading and avoids import-time dependency issues
-# All dependency management is handled automatically by Start-PIMActivation
-
-#endregion Module Initialization
 
 #region Cleanup
 

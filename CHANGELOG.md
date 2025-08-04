@@ -15,29 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.2.1] - 2025-08-04
-
-### Added
-- **Automatic Dependency Resolution**: Enhanced `Start-PIMActivation` with automatic conflict detection and module installation
-- **Force Parameter**: Added `-Force` parameter to `Start-PIMActivation` for fully automated dependency resolution
-- **Clean Console Output**: Suppressed verbose output noise while preserving debugging capabilities when requested
-- **Module Requirements**: Added explicit `#Requires` statements for all required Microsoft Graph modules and versions
-
-### Fixed
-- **Verbose Output Noise**: Suppressed "Populating RepositorySourceLocation" and other unwanted Get-Module verbose messages
-- **Function Import Verbosity**: Eliminated verbose function import messages during module loading  
-- **Console Clutter**: Removed duplicate dependency checking logic and unnecessary output during normal operation
-- **Performance**: Replaced `+=` operators with `ArrayList.Add()` for better performance in loops and array operations
-- **Code Readability**: Replaced backtick line continuations with parameter splatting for improved maintainability
-
-### Technical Improvements
-- **Resolve-PIMDependencies**: New internal function for comprehensive dependency resolution with retry logic
-- **Enhanced Error Messages**: Improved user guidance for dependency resolution issues
-- **Code Quality**: Performance optimizations including ArrayList usage and cleaner parameter handling
-- **Maintainability**: Improved code structure with splatting instead of line continuations
-
----
-
 ## [1.2.0] - 2025-07-31
 
 ### Added

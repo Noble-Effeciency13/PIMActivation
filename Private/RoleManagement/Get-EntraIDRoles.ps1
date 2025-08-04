@@ -37,19 +37,16 @@ function Get-EntraIDRoles {
         [string]$UserId
     )
     
-    $roles = [System.Collections.ArrayList]::new()
+    $roles = @()
     
     try {
         Write-Verbose "Retrieving Entra ID roles for user: $UserId"
         
         # Get eligible role assignments
         Write-Verbose "Querying eligible role assignments..."
-        $eligibleParams = @{
-            Filter = "principalId eq '$UserId'"
-            ExpandProperty = 'roleDefinition'
-            ErrorAction = 'Stop'
-        }
-        $eligibleAssignments = Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance @eligibleParams
+        $eligibleAssignments = Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance `
+            -Filter "principalId eq '$UserId'" `
+            -ExpandProperty roleDefinition -ErrorAction Stop
         
         $eligibleAssignments = @($eligibleAssignments)
 
@@ -67,7 +64,7 @@ function Get-EntraIDRoles {
                 "Direct"
             }
             
-            $null = $roles.Add([PSCustomObject]@{
+            $roles += [PSCustomObject]@{
                 Id = $assignment.RoleDefinitionId
                 Name = $assignment.RoleDefinition.DisplayName
                 Type = 'Entra'
@@ -81,16 +78,14 @@ function Get-EntraIDRoles {
                 DirectoryScopeId = $assignment.DirectoryScopeId
                 PrincipalId = $assignment.PrincipalId
                 Assignment = $assignment
-            })
+            }
         }
         
         # Get active role assignments
         Write-Verbose "Querying active role assignments..."
-        $activeParams = @{
-            Filter = "principalId eq '$UserId'"
-            ErrorAction = 'Stop'
-        }
-        $activeAssignments = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance @activeParams
+        $activeAssignments = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance `
+            -Filter "principalId eq '$UserId'" `
+            -ErrorAction Stop
         
         $activeAssignments = @($activeAssignments)
         
@@ -101,7 +96,7 @@ function Get-EntraIDRoles {
                 $roleDetails = Get-MgDirectoryRole -Filter "roleTemplateId eq '$($assignment.RoleDefinitionId)'" -ErrorAction Stop
                 
                 if ($roleDetails) {
-                    $null = $roles.Add([PSCustomObject]@{
+                    $roles += [PSCustomObject]@{
                         Id = $assignment.RoleDefinitionId
                         Name = $roleDetails.DisplayName
                         Type = 'Entra'
@@ -115,7 +110,7 @@ function Get-EntraIDRoles {
                         DirectoryScopeId = $assignment.DirectoryScopeId
                         PrincipalId = $assignment.PrincipalId
                         Assignment = $assignment
-                    })
+                    }
                 }
             }
             catch {

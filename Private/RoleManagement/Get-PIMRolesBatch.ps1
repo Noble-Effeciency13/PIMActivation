@@ -77,13 +77,11 @@ function Get-PIMRolesBatch {
             
             try {
                 # Get all eligible assignments with expanded properties in one call
-                $eligibleParams = @{
-                    Filter = "principalId eq '$UserId'"
-                    ExpandProperty = 'roleDefinition'
-                    Select = 'id,principalId,roleDefinitionId,directoryScopeId,startDateTime,endDateTime,memberType,roleDefinition'
-                    All = $true
-                }
-                $eligibleAssignments = Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance @eligibleParams
+                $eligibleAssignments = Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance `
+                    -Filter "principalId eq '$UserId'" `
+                    -ExpandProperty "roleDefinition" `
+                    -Select "id,principalId,roleDefinitionId,directoryScopeId,startDateTime,endDateTime,memberType,roleDefinition" `
+                    -All
                 
                 # Update progress: Active roles fetched, starting eligible
                 if ($SplashForm -and -not $SplashForm.IsDisposed) {
@@ -99,13 +97,11 @@ function Get-PIMRolesBatch {
                 Write-Verbose "Found $($eligibleAssignments.Count) eligible Entra assignments"
                 
                 # Get all active assignments with expanded properties in one call
-                $activeParams = @{
-                    Filter = "principalId eq '$UserId'"
-                    ExpandProperty = 'roleDefinition'
-                    Select = 'id,principalId,roleDefinitionId,directoryScopeId,startDateTime,endDateTime,memberType,roleDefinition'
-                    All = $true
-                }
-                $activeAssignments = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance @activeParams
+                $activeAssignments = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance `
+                    -Filter "principalId eq '$UserId'" `
+                    -ExpandProperty "roleDefinition" `
+                    -Select "id,principalId,roleDefinitionId,directoryScopeId,startDateTime,endDateTime,memberType,roleDefinition" `
+                    -All
                 
                 # Ensure we have arrays to work with
                 if (-not $activeAssignments) {
@@ -250,13 +246,11 @@ function Get-PIMRolesBatch {
             
             try {
                 # Get all group memberships with expanded properties
-                $eligibleGroupParams = @{
-                    Filter = "principalId eq '$UserId'"
-                    ExpandProperty = 'group'
-                    Select = 'id,principalId,groupId,accessId,startDateTime,endDateTime,group'
-                    All = $true
-                }
-                $eligibleGroups = Get-MgIdentityGovernancePrivilegedAccessGroupEligibilityScheduleInstance @eligibleGroupParams
+                $eligibleGroups = Get-MgIdentityGovernancePrivilegedAccessGroupEligibilityScheduleInstance `
+                    -Filter "principalId eq '$UserId'" `
+                    -ExpandProperty "group" `
+                    -Select "id,principalId,groupId,accessId,startDateTime,endDateTime,group" `
+                    -All
                 
                 # Ensure we have arrays to work with
                 if (-not $eligibleGroups) {
@@ -266,13 +260,11 @@ function Get-PIMRolesBatch {
                 }
                 Write-Verbose "Found $($eligibleGroups.Count) eligible group memberships"
                 
-                $activeGroupParams = @{
-                    Filter = "principalId eq '$UserId'"
-                    ExpandProperty = 'group'
-                    Select = 'id,principalId,groupId,accessId,startDateTime,endDateTime,group'
-                    All = $true
-                }
-                $activeGroups = Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleInstance @activeGroupParams
+                $activeGroups = Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleInstance `
+                    -Filter "principalId eq '$UserId'" `
+                    -ExpandProperty "group" `
+                    -Select "id,principalId,groupId,accessId,startDateTime,endDateTime,group" `
+                    -All
                 
                 # Ensure we have arrays to work with
                 if (-not $activeGroups) {
@@ -339,7 +331,7 @@ function Get-PIMRolesBatch {
                         }
                         
                         # Fetch roles provided by this group membership
-                        $providedRoles = [System.Collections.ArrayList]::new()
+                        $providedRoles = @()
                         try {
                             Write-Verbose "Fetching roles provided by group: $($membership.Group.DisplayName)"
                             $groupRoleAssignments = Get-MgRoleManagementDirectoryRoleAssignment -Filter "principalId eq '$($membership.GroupId)'" -ExpandProperty "roleDefinition" -Select "id,principalId,roleDefinitionId,directoryScopeId,roleDefinition" -ErrorAction SilentlyContinue
@@ -359,7 +351,7 @@ function Get-PIMRolesBatch {
                                             DirectoryScopeId = $roleAssignment.DirectoryScopeId
                                             ScopeDisplayName = try { Get-ScopeDisplayName -Scope $roleAssignment.DirectoryScopeId } catch { "Directory" }
                                         }
-                                        $null = $providedRoles.Add($providedRole)
+                                        $providedRoles += $providedRole
                                         Write-Verbose "Group $($membership.Group.DisplayName) provides role: $($providedRole.DisplayName)"
                                     }
                                     catch {
@@ -454,7 +446,7 @@ function Get-PIMRolesBatch {
                         }
                         
                         # Fetch roles provided by this group membership
-                        $providedRoles = [System.Collections.ArrayList]::new()
+                        $providedRoles = @()
                         try {
                             Write-Verbose "Fetching roles provided by active group: $($membership.Group.DisplayName)"
                             $groupRoleAssignments = Get-MgRoleManagementDirectoryRoleAssignment -Filter "principalId eq '$($membership.GroupId)'" -ExpandProperty "roleDefinition" -Select "id,principalId,roleDefinitionId,directoryScopeId,roleDefinition" -ErrorAction SilentlyContinue
@@ -474,7 +466,7 @@ function Get-PIMRolesBatch {
                                             DirectoryScopeId = $roleAssignment.DirectoryScopeId
                                             ScopeDisplayName = try { Get-ScopeDisplayName -Scope $roleAssignment.DirectoryScopeId } catch { "Directory" }
                                         }
-                                        $null = $providedRoles.Add($providedRole)
+                                        $providedRoles += $providedRole
                                         Write-Verbose "Active group $($membership.Group.DisplayName) provides role: $($providedRole.DisplayName)"
                                     }
                                     catch {
@@ -572,10 +564,10 @@ function Get-PIMRolesBatch {
         }
         
         # Batch fetch all unique policies
-        $uniqueRoleIds = [System.Collections.ArrayList]::new()
-        $null = $uniqueRoleIds.AddRange(@($result.EligibleRoles | Where-Object { $_.Type -eq 'Entra' } | Select-Object -ExpandProperty RoleDefinitionId -Unique))
-        $uniqueGroupIds = [System.Collections.ArrayList]::new()
-        $null = $uniqueGroupIds.AddRange(@($result.EligibleRoles | Where-Object { $_.Type -eq 'Group' } | Select-Object -ExpandProperty GroupId -Unique))
+        $uniqueRoleIds = @()
+        $uniqueRoleIds += @($result.EligibleRoles | Where-Object { $_.Type -eq 'Entra' } | Select-Object -ExpandProperty RoleDefinitionId -Unique)
+        $uniqueGroupIds = @()
+        $uniqueGroupIds += @($result.EligibleRoles | Where-Object { $_.Type -eq 'Group' } | Select-Object -ExpandProperty GroupId -Unique)
         
         # Update progress: Starting policy fetch
         if ($SplashForm -and -not $SplashForm.IsDisposed) {
@@ -701,9 +693,9 @@ function Get-PIMRolesBatch {
         Write-Verbose "Found $($activeGroupRoles.Count) active groups, $($eligibleGroupRoles.Count) eligible groups, and $($allActiveEntraRoles.Count) active Entra roles"
         
         # Combine all groups (active and eligible) for role mapping
-        $allGroups = [System.Collections.ArrayList]::new()
-        $null = $allGroups.AddRange($activeGroupRoles)
-        $null = $allGroups.AddRange($eligibleGroupRoles)
+        $allGroups = @()
+        $allGroups += $activeGroupRoles
+        $allGroups += $eligibleGroupRoles
         
         if ($allGroups.Count -gt 0) {
             # Debug: Show what groups we have and their provided roles
@@ -745,7 +737,7 @@ function Get-PIMRolesBatch {
                                 $roleId = $providedRole.RoleDefinitionId
                                 
                                 if (-not $roleProvidedByGroups.ContainsKey($roleId)) {
-                                    $roleProvidedByGroups[$roleId] = [System.Collections.ArrayList]::new()
+                                    $roleProvidedByGroups[$roleId] = @()
                                 }
                                 
                                 # Store group info with this role, marking if it's active
@@ -757,14 +749,14 @@ function Get-PIMRolesBatch {
                                     $groupEndDateTime = $group.EndDateTime
                                 }
                                 
-                                $null = $roleProvidedByGroups[$roleId].Add([PSCustomObject]@{
+                                $roleProvidedByGroups[$roleId] += [PSCustomObject]@{
                                     Group = $group
                                     ProvidedRole = $providedRole
                                     IsActiveGroup = $isActiveGroup
                                     HasExpiration = [bool]$groupEndDateTime
                                     ExpirationDateTime = $groupEndDateTime
                                     Priority = if ($isActiveGroup) { 1 } else { 2 }  # Active groups get priority
-                                })
+                                }
                             }
                             catch {
                                 Write-Warning "Failed to process provided role '$($providedRole.DisplayName)' for group '$($group.DisplayName)': $_"
@@ -805,8 +797,8 @@ function Get-PIMRolesBatch {
                     # PRIORITY: First, handle any inherited roles (these definitely come from groups)
                     # Since MemberType might not reliably indicate 'Inherited', we'll use a smarter approach:
                     # If a role is provided by an active group and the expiration time matches, treat it as inherited
-                    $inheritedRoles = [System.Collections.ArrayList]::new()
-                    $directRoles = [System.Collections.ArrayList]::new()
+                    $inheritedRoles = @()
+                    $directRoles = @()
                     
                     foreach ($role in $roleInstances) {
                         $isLikelyInherited = $false
@@ -836,9 +828,9 @@ function Get-PIMRolesBatch {
                         }
                         
                         if ($isLikelyInherited) {
-                            $null = $inheritedRoles.Add($role)
+                            $inheritedRoles += $role
                         } else {
-                            $null = $directRoles.Add($role)
+                            $directRoles += $role
                         }
                         
                         Write-Verbose "    Role '$($role.DisplayName)' classified as: $(if ($isLikelyInherited) { 'INHERITED' } else { 'DIRECT' }) (MemberType: '$($role.MemberType)', EndDateTime: $($role.EndDateTime))"
@@ -847,7 +839,7 @@ function Get-PIMRolesBatch {
                     Write-Verbose "  Found $($inheritedRoles.Count) inherited role(s) and $($directRoles.Count) direct role(s)"
                     
                     # Process inherited roles first - these MUST be attributed to groups
-                    $usedGroups = [System.Collections.ArrayList]::new()  # Track which groups have been used for attribution
+                    $usedGroups = @()  # Track which groups have been used for attribution
                     foreach ($inheritedRole in $inheritedRoles) {
                         if ($providingGroups -and $providingGroups.Count -gt 0) {
                             # Try to find the best matching group for this inherited role
@@ -877,7 +869,7 @@ function Get-PIMRolesBatch {
                             }
                             
                             # Track this group as used
-                            $null = $usedGroups.Add($bestGroup.Group.DisplayName)
+                            $usedGroups += $bestGroup.Group.DisplayName
                             
                             Write-Verbose "  Attributing inherited role '$($inheritedRole.DisplayName)' to group '$($bestGroup.Group.DisplayName)'"
                             
@@ -930,21 +922,19 @@ function Get-PIMRolesBatch {
                         
                         # Find the best group for attribution
                         try {
-                            $sortProperties = @(
-                                @{Expression = {
+                            $bestGroup = $providingGroups | Sort-Object `
+                                @{Expression={
                                     try { $_.Priority } catch { 2 }
-                                }; Descending = $false}
-                                @{Expression = {
+                                }; Descending=$false}, `
+                                @{Expression={
                                     try {
                                         $groupExp = if ($_.PSObject.Properties['ExpirationDateTime']) { $_.ExpirationDateTime } else { $null }
                                         if ($groupExp -eq $currentEndDateTime) { 0 } else { 1 }
                                     } catch { 1 }
-                                }; Descending = $false}
-                                @{Expression = {
+                                }; Descending=$false}, `
+                                @{Expression={
                                     try { if ($_.PSObject.Properties['HasExpiration']) { $_.HasExpiration } else { $false } } catch { $false }
-                                }; Descending = $false}
-                            )
-                            $bestGroup = $providingGroups | Sort-Object $sortProperties | 
+                                }; Descending=$false} | 
                                 Select-Object -First 1
                         }
                         catch {
@@ -1036,12 +1026,12 @@ function Get-PIMRolesBatch {
                                 # Prefer active groups over eligible groups, then consider expiration characteristics
                                 
                                 # Sort available groups by priority and preference
-                                $sortProps = @(
-                                    @{Expression = {
+                                $bestAvailableGroup = $unassignedGroups | Sort-Object `
+                                    @{Expression={
                                         # Priority 1: Active groups first
                                         try { $_.GroupInfo.Priority } catch { 2 }
-                                    }; Descending = $false}
-                                    @{Expression = {
+                                    }; Descending=$false}, `
+                                    @{Expression={
                                         # Priority 2: If current role has no expiration, prefer groups with expiration 
                                         # (to match group-derived roles to their actual source)
                                         if (-not $currentEndDateTime) {
@@ -1050,8 +1040,8 @@ function Get-PIMRolesBatch {
                                             # If role has expiration, prefer exact match
                                             if ($_.GroupInfo.ExpirationDateTime -eq $currentEndDateTime) { 0 } else { 1 }
                                         }
-                                    }; Descending = $false}
-                                    @{Expression = {
+                                    }; Descending=$false}, `
+                                    @{Expression={
                                         # Priority 3: Prefer shorter expirations first (more specific assignments)
                                         try {
                                             if ($_.GroupInfo.ExpirationDateTime) {
@@ -1062,9 +1052,8 @@ function Get-PIMRolesBatch {
                                         } catch {
                                             [datetime]::MaxValue
                                         }
-                                    }; Descending = $false}
-                                )
-                                $bestAvailableGroup = $unassignedGroups | Sort-Object $sortProps | Select-Object -First 1
+                                    }; Descending=$false} | 
+                                    Select-Object -First 1
                                 
                                 if ($bestAvailableGroup) {
                                     $matchReason = "best priority-based match"

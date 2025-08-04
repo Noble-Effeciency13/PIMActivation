@@ -46,37 +46,23 @@ function Initialize-PIMModules {
         }
         
         # Validate required module availability
-        # Temporarily suppress verbose output during Get-Module operations
-        $currentVerbose = $VerbosePreference
-        $VerbosePreference = 'SilentlyContinue'
-        
-        try {
-            foreach ($moduleSpec in $script:RequiredModuleVersions.GetEnumerator()) {
-                $moduleName = $moduleSpec.Key
-                $requiredVersion = $moduleSpec.Value
-                
-                # Restore verbose for our own output
-                $VerbosePreference = $currentVerbose
-                Write-Verbose "Checking availability of $moduleName version $requiredVersion"
-                $VerbosePreference = 'SilentlyContinue'
-                
-                $availableModule = Get-Module -Name $moduleName -ListAvailable | 
-                    Where-Object { $_.Version -eq $requiredVersion } |
-                    Select-Object -First 1
-                
-                if (-not $availableModule) {
-                    $VerbosePreference = $currentVerbose
-                    $errorMsg = "Required module $moduleName version $requiredVersion is not installed. Please run: Install-Module -Name $moduleName -RequiredVersion $requiredVersion -Force"
-                    Write-Error $errorMsg
-                    $result.Success = $false
-                    $result.Error = $errorMsg
-                    return $result
-                }
+        foreach ($moduleSpec in $script:RequiredModuleVersions.GetEnumerator()) {
+            $moduleName = $moduleSpec.Key
+            $requiredVersion = $moduleSpec.Value
+            
+            Write-Verbose "Checking availability of $moduleName version $requiredVersion"
+            
+            $availableModule = Get-Module -Name $moduleName -ListAvailable | 
+                Where-Object { $_.Version -eq $requiredVersion } |
+                Select-Object -First 1
+            
+            if (-not $availableModule) {
+                $errorMsg = "Required module $moduleName version $requiredVersion is not installed. Please run: Install-Module -Name $moduleName -RequiredVersion $requiredVersion -Force"
+                Write-Error $errorMsg
+                $result.Success = $false
+                $result.Error = $errorMsg
+                return $result
             }
-        }
-        finally {
-            # Always restore the original verbose preference
-            $VerbosePreference = $currentVerbose
         }
         
         # Initialize module loading state tracking
@@ -130,52 +116,36 @@ function Import-PIMModule {
         $requiredVersion = $script:RequiredModuleVersions[$ModuleName]
         Write-Verbose "Loading $ModuleName version $requiredVersion"
         
-        # Temporarily suppress verbose output during Get-Module operations
-        $currentVerbose = $VerbosePreference
-        $VerbosePreference = 'SilentlyContinue'
-        
-        try {
-            # Remove any currently loaded versions of this module
-            $loadedModule = Get-Module -Name $ModuleName
-            if ($loadedModule) {
-                if ($loadedModule.Version -ne $requiredVersion) {
-                    # Restore verbose for our own output
-                    $VerbosePreference = $currentVerbose
-                    Write-Verbose "Removing currently loaded version $($loadedModule.Version) of $ModuleName"
-                    $VerbosePreference = 'SilentlyContinue'
-                    Remove-Module -Name $ModuleName -Force
-                } else {
-                    $VerbosePreference = $currentVerbose
-                    Write-Verbose "$ModuleName version $requiredVersion is already loaded"
-                    $script:ModuleLoadingState[$ModuleName] = 'Loaded'
-                    return $true
-                }
+        # Remove any currently loaded versions of this module
+        $loadedModule = Get-Module -Name $ModuleName
+        if ($loadedModule) {
+            if ($loadedModule.Version -ne $requiredVersion) {
+                Write-Verbose "Removing currently loaded version $($loadedModule.Version) of $ModuleName"
+                Remove-Module -Name $ModuleName -Force
+            } else {
+                Write-Verbose "$ModuleName version $requiredVersion is already loaded"
+                $script:ModuleLoadingState[$ModuleName] = 'Loaded'
+                return $true
             }
-            
-            # Import the specific version
-            $moduleToImport = Get-Module -Name $ModuleName -ListAvailable | 
-                Where-Object { $_.Version -eq $requiredVersion } |
-                Select-Object -First 1
-                
-            if (-not $moduleToImport) {
-                $VerbosePreference = $currentVerbose
-                throw "Required version $requiredVersion of $ModuleName is not available"
-            }
-            
-            Import-Module -ModuleInfo $moduleToImport -Force -Global
-        }
-        finally {
-            # Always restore the original verbose preference
-            $VerbosePreference = $currentVerbose
         }
         
+        # Import the specific version
+        $moduleToImport = Get-Module -Name $ModuleName -ListAvailable | 
+            Where-Object { $_.Version -eq $requiredVersion } |
+            Select-Object -First 1
+            
+        if (-not $moduleToImport) {
+            throw "Required version $requiredVersion of $ModuleName is not available"
+        }
+        
+        Import-Module -ModuleInfo $moduleToImport -Force -Global
         $script:ModuleLoadingState[$ModuleName] = 'Loaded'
         
         Write-Verbose "Successfully loaded $ModuleName version $requiredVersion"
         return $true
         
     } catch {
-        Write-Error "Failed to import $ModuleName{0} $($_.Exception.Message)" -f ": "
+        Write-Error "Failed to import $ModuleName`: $($_.Exception.Message)"
         $script:ModuleLoadingState[$ModuleName] = 'Failed'
         return $false
     }
@@ -275,7 +245,7 @@ function Get-PIMModuleStatus {
     
     $status = [PSCustomObject]@{
         RequiredVersions = $script:RequiredModuleVersions
-        LoadedModules = [System.Collections.ArrayList]::new()
+        LoadedModules = @()
         LoadingState = $script:ModuleLoadingState
         Compatible = $false
     }
@@ -283,12 +253,12 @@ function Get-PIMModuleStatus {
     foreach ($moduleName in $script:RequiredModuleVersions.Keys) {
         $loadedModule = Get-Module -Name $moduleName
         if ($loadedModule) {
-            $null = $status.LoadedModules.Add([PSCustomObject]@{
+            $status.LoadedModules += [PSCustomObject]@{
                 Name = $moduleName
                 LoadedVersion = $loadedModule.Version
                 RequiredVersion = $script:RequiredModuleVersions[$moduleName]
                 IsCorrectVersion = ($loadedModule.Version -eq $script:RequiredModuleVersions[$moduleName])
-            })
+            }
         }
     }
     

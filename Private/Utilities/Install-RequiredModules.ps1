@@ -42,13 +42,7 @@ function Install-RequiredModules {
         [hashtable[]]$RequiredModules,
         
         [Parameter()]
-        [switch]$IncludeAzureModules,
-        
-        [Parameter()]
-        [switch]$Force,
-        
-        [Parameter()]
-        [switch]$AutoResolveConflicts
+        [switch]$IncludeAzureModules
     )
     
     $result = [PSCustomObject]@{
@@ -60,96 +54,20 @@ function Install-RequiredModules {
         # Initialize module list with defaults if not provided
         if (-not $RequiredModules) {
             Write-Verbose "Using default Microsoft Graph module set"
-            $moduleList = [System.Collections.ArrayList]::new()
-            $null = $moduleList.AddRange(@(
-                @{Name = 'Microsoft.Graph.Authentication'; MinVersion = '2.29.0'},
-                @{Name = 'Microsoft.Graph.Users'; MinVersion = '2.29.0'},
-                @{Name = 'Microsoft.Graph.Identity.DirectoryManagement'; MinVersion = '2.29.0'},
-                @{Name = 'Microsoft.Graph.Identity.Governance'; MinVersion = '2.29.0'},
-                @{Name = 'Microsoft.Graph.Groups'; MinVersion = '2.29.0'},
-                @{Name = 'Microsoft.Graph.Identity.SignIns'; MinVersion = '2.29.0'},
-                @{Name = 'Az.Accounts'; MinVersion = '5.1.0'}
-            ))
+            $RequiredModules = @(
+                @{Name = 'Microsoft.Graph.Authentication'; MinVersion = '2.0.0'},
+                @{Name = 'Microsoft.Graph.Users'; MinVersion = '2.0.0'},
+                @{Name = 'Microsoft.Graph.Identity.DirectoryManagement'; MinVersion = '2.0.0'},
+                @{Name = 'Microsoft.Graph.Identity.Governance'; MinVersion = '2.0.0'},
+                @{Name = 'Az.Accounts'; MinVersion = '3.0.0'}
+            )
             
             if ($IncludeAzureModules) {
                 Write-Verbose "Including Azure PowerShell modules"
-                $null = $moduleList.Add(@{Name = 'Az.Resources'; MinVersion = '6.0.0'})
+                $RequiredModules += @(
+                    @{Name = 'Az.Resources'; MinVersion = '6.0.0'}
+                )
             }
-            
-            $RequiredModules = $moduleList.ToArray()
-        }
-        
-        # Check for version conflicts before proceeding
-        Write-Host "🔍 Checking for module version conflicts..." -ForegroundColor Yellow
-        $moduleVersionMap = @{}
-        foreach ($module in $RequiredModules) {
-            $moduleVersionMap[$module.Name] = $module.MinVersion
-        }
-        
-        if ($AutoResolveConflicts) {
-            Write-Verbose "Checking for module version conflicts..."
-            $conflictResult = Test-ModuleVersionConflicts -RequiredModuleVersions $moduleVersionMap -AutoResolve:$Force -Force:$Force
-            
-            if ($conflictResult.HasConflicts -and -not $conflictResult.AutoResolutionSuccess) {
-                Write-Warning "Some version conflicts could not be resolved automatically."
-                if ($conflictResult.Recommendations.Count -gt 0) {
-                    Write-Host "`nRecommendations:" -ForegroundColor Yellow
-                    foreach ($recommendation in $conflictResult.Recommendations) {
-                        Write-Host "  • $recommendation" -ForegroundColor White
-                    }
-                }
-                
-                if (-not $Force) {
-                    $userChoice = Read-Host "`nContinue with installation anyway? (y/N)"
-                    if ($userChoice -ne 'y') {
-                        $result.Success = $false
-                        $result.Error = "Installation cancelled due to version conflicts"
-                        return $result
-                    }
-                }
-            }
-            elseif ($conflictResult.AutoResolutionSuccess) {
-                Write-Verbose "Version conflicts resolved automatically"
-            }
-            else {
-                Write-Verbose "No version conflicts detected"
-            }
-        }
-        else {
-            Write-Verbose "Skipping automatic conflict resolution"
-        }
-        
-        $conflictCheck = Test-ModuleVersionConflicts -RequiredModuleVersions $moduleVersionMap
-        
-        if ($conflictCheck.HasConflicts) {
-            Write-Warning "Module version conflicts detected!"
-            
-            foreach ($conflict in $conflictCheck.Conflicts) {
-                if ($conflict.Severity -eq 'High') {
-                    Write-Warning "❌ $($conflict.ModuleName): Loaded v$($conflict.LoadedVersion) < Required v$($conflict.RequiredVersion)"
-                }
-                else {
-                    Write-Warning "⚠️  $($conflict.ModuleName): Loaded v$($conflict.LoadedVersion) > Required v$($conflict.RequiredVersion) (newer version detected)"
-                }
-            }
-            
-            if (-not $conflictCheck.SafeToProceed) {
-                $result.Success = $false
-                $result.Error = "Incompatible module versions are currently loaded. Please restart PowerShell session and try again."
-                
-                Write-Warning "Resolution steps:"
-                foreach ($recommendation in $conflictCheck.Recommendations) {
-                    Write-Warning "  • $recommendation"
-                }
-                
-                return $result
-            }
-            else {
-                Write-Warning "Proceeding with newer module versions - monitor for compatibility issues"
-            }
-        }
-        else {
-            Write-Verbose "✓ No module version conflicts detected"
         }
         
         # Determine installation scope based on privileges
@@ -206,41 +124,30 @@ function Install-RequiredModules {
                 }
                 
                 # Install the module
-                $installParams = @{
-                    Name = $module.Name
-                    MinimumVersion = $module.MinVersion
-                    Scope = $installScope
-                    Force = $true
-                    AllowClobber = $true
-                    Repository = 'PSGallery'
-                    ErrorAction = 'Stop'
-                }
-                Install-Module @installParams
+                Install-Module -Name $module.Name `
+                             -MinimumVersion $module.MinVersion `
+                             -Scope $installScope `
+                             -Force `
+                             -AllowClobber `
+                             -Repository PSGallery `
+                             -ErrorAction Stop
                 
                 # Import the newly installed module
-                $importParams = @{
-                    Name = $module.Name
-                    MinimumVersion = $module.MinVersion
-                    ErrorAction = 'Stop'
-                }
-                Import-Module @importParams
+                Import-Module -Name $module.Name -MinimumVersion $module.MinVersion -ErrorAction Stop
                 Write-Verbose "✓ $($module.Name) installed and imported successfully"
             }
             catch {
                 # Fallback: retry with CurrentUser scope only
                 try {
                     Write-Verbose "Retrying installation with CurrentUser scope..."
-                    $fallbackParams = @{
-                        Name = $module.Name
-                        MinimumVersion = $module.MinVersion
-                        Scope = 'CurrentUser'
-                        Force = $true
-                        AllowClobber = $true
-                        ErrorAction = 'Stop'
-                    }
-                    Install-Module @fallbackParams
+                    Install-Module -Name $module.Name `
+                                 -MinimumVersion $module.MinVersion `
+                                 -Scope CurrentUser `
+                                 -Force `
+                                 -AllowClobber `
+                                 -ErrorAction Stop
                     
-                    Import-Module @importParams
+                    Import-Module -Name $module.Name -MinimumVersion $module.MinVersion -ErrorAction Stop
                     Write-Verbose "✓ $($module.Name) installed successfully (fallback)"
                 }
                 catch {

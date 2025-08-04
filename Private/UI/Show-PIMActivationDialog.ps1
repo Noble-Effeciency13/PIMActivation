@@ -185,7 +185,7 @@ function Show-PIMActivationDialog {
             $ticketText = $form.Controls["txtTicket"].Text.Trim()
             if ([string]::IsNullOrWhiteSpace($ticketText)) {
                 $isValid = $false
-                $validationMessage += "Ticket number is required.{0}" -f [Environment]::NewLine
+                $validationMessage += "Ticket number is required.`n"
             }
         }
         
