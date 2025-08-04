@@ -59,9 +59,9 @@ function Clear-AuthenticationCache {
             $edgeCookies = Join-Path $env:LOCALAPPDATA "Microsoft\Edge\User Data\Default\Cookies"
             $chromeCookies = Join-Path $env:LOCALAPPDATA "Google\Chrome\User Data\Default\Cookies"
             
-            $browserPaths = @()
-            if (Test-Path $edgeCookies) { $browserPaths += "Edge" }
-            if (Test-Path $chromeCookies) { $browserPaths += "Chrome" }
+            $browserPaths = [System.Collections.ArrayList]::new()
+            if (Test-Path $edgeCookies) { $null = $browserPaths.Add("Edge") }
+            if (Test-Path $chromeCookies) { $null = $browserPaths.Add("Chrome") }
             
             if ($browserPaths.Count -gt 0) {
                 Write-Verbose "Browser cookie stores detected for: $($browserPaths -join ', ')"

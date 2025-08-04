@@ -65,7 +65,7 @@ function Start-PIMActivation {
     .NOTES
         Name: Start-PIMActivation
         Author: Sebastian Flæng Markdanner
-        Version: 1.2.0
+        Version: 1.2.1
         
         This function requires PowerShell 7+ and will automatically restart in STA mode if needed.
         Missing required modules are automatically installed from the PowerShell Gallery.
@@ -83,16 +83,25 @@ function Start-PIMActivation {
     [OutputType([void])]
     param(
         [Parameter(HelpMessage = "Include Entra ID roles in the activation interface")]
-        [switch]$IncludeEntraRoles = $true,
+        [switch]$IncludeEntraRoles,
         
         [Parameter(HelpMessage = "Include PIM-enabled groups in the activation interface")]
-        [switch]$IncludeGroups = $true,
+        [switch]$IncludeGroups,
         
         [Parameter(HelpMessage = "Include Azure resource roles (Not yet implemented - planned for v2.0.0)")]
-        [switch]$IncludeAzureResources
+        [switch]$IncludeAzureResources,
+        
+        [Parameter(HelpMessage = "Skip confirmation prompts for automatic dependency resolution")]
+        [switch]$Force,
+        
+        [Parameter(HelpMessage = "Disable automatic dependency resolution and require manual intervention")]
+        [switch]$ManualDependencyCheck
     )
     
     begin {
+        # Set default values for switches (PowerShell best practice)
+        if (-not $PSBoundParameters.ContainsKey('IncludeEntraRoles')) { $IncludeEntraRoles = $true }
+        if (-not $PSBoundParameters.ContainsKey('IncludeGroups')) { $IncludeGroups = $true }
         Write-Verbose "Starting PIM Activation Tool initialization"
         
         # Validate PowerShell version requirement
@@ -100,6 +109,59 @@ function Start-PIMActivation {
             $errorMessage = "PowerShell 7 or later is required. Current version: $($PSVersionTable.PSVersion). Please upgrade from https://aka.ms/powershell"
             Write-Error $errorMessage -Category InvalidOperation
             throw $errorMessage
+        }
+        
+        try {
+            # Check if user wants to proceed with starting the PIM activation tool
+            if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
+                Write-Verbose "Operation cancelled by user"
+                return
+            }
+            
+            # Automatic dependency resolution with minimal output
+            if (-not $ManualDependencyCheck) {
+                Write-Verbose "Performing automatic dependency resolution..."
+                $dependencyResult = Resolve-PIMDependencies -Force:$Force
+                
+                if (-not $dependencyResult.Success) {
+                    Write-Error "Dependency resolution failed: $($dependencyResult.Errors -join '; ')" -Category OperationStopped
+                    return
+                }
+                
+                Write-Verbose "All dependencies resolved automatically"
+            }
+            else {
+                # Manual dependency checking (minimal output mode)
+                Write-Verbose "Checking PIM dependencies manually..."
+                $dependencyCheck = Test-PIMDependencies
+                
+                if (-not $dependencyCheck.ReadyForActivation) {
+                    switch ($dependencyCheck.OverallStatus) {
+                        'Version-Conflicts' {
+                            Write-Warning "Version conflicts detected. This may cause assembly loading errors."
+                            Write-Host "`nTo resolve conflicts automatically:" -ForegroundColor Yellow
+                            Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
+                            return
+                        }
+                        'Missing-Dependencies' {
+                            Write-Warning "Missing required dependencies."
+                            Write-Host "`nTo resolve dependencies automatically:" -ForegroundColor Yellow
+                            Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
+                            return
+                        }
+                        default {
+                            Write-Warning "Dependency check failed: $($dependencyCheck.OverallStatus)"
+                            return
+                        }
+                    }
+                }
+                
+                Write-Verbose "Dependencies verified successfully"
+            }
+        }
+        catch {
+            Write-Error "Failed to initialize PIM Activation: $($_.Exception.Message)" -Category OperationStopped
+            throw
         }
         
         # Configure execution preferences
@@ -128,13 +190,14 @@ function Start-PIMActivation {
     }
     
     process {
+        # Set up verbose preference early (needed for Initialize-PIMModules call)
+        if ($PSCmdlet.MyInvocation.BoundParameters.ContainsKey('Verbose')) {
+            $script:UserVerbose = $true
+        } else {
+            $script:UserVerbose = $false
+        }
+        
         try {
-            # Check if user wants to proceed with starting the PIM activation tool
-            if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
-                Write-Verbose "Operation cancelled by user"
-                return
-            }
-            
             # Ensure Single-Threaded Apartment mode for Windows Forms
             if (-not (Test-STAMode)) {
                 Write-Verbose "Restarting in STA mode for Windows Forms compatibility"
@@ -248,7 +311,7 @@ function Start-PIMActivation {
             # Display user-friendly error dialog
             try {
                 [System.Windows.Forms.MessageBox]::Show(
-                    "Failed to start PIM Activation Tool:`n`n$($_.Exception.Message)",
+                    "Failed to start PIM Activation Tool:{0}{0}$($_.Exception.Message)" -f [Environment]::NewLine,
                     "PIM Activation Error",
                     [System.Windows.Forms.MessageBoxButtons]::OK,
                     [System.Windows.Forms.MessageBoxIcon]::Error

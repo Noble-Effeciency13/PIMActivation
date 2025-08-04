@@ -409,7 +409,7 @@ function Initialize-PIMForm {
         $btnSwitchAccount.Add_Click({
             $confirmResult = [System.Windows.Forms.MessageBox]::Show(
                 $form,
-                "Switching accounts will close this window and restart the application.`n`nContinue?",
+                "Switching accounts will close this window and restart the application.{0}{0}Continue?" -f [Environment]::NewLine,
                 "Switch Account",
                 [System.Windows.Forms.MessageBoxButtons]::YesNo,
                 [System.Windows.Forms.MessageBoxIcon]::Question

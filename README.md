@@ -71,12 +71,16 @@ On first launch, you'll be prompted to authenticate with Microsoft Graph using y
 - **.NET Framework 4.7.2+** (for Windows Forms support)
 
 ### Required PowerShell Modules
-The following modules will be automatically installed if missing:
-- `Microsoft.Graph.Authentication` (2.9+)
-- `Microsoft.Graph.Users`
-- `Microsoft.Graph.Identity.DirectoryManagement`
-- `Microsoft.Graph.Identity.Governance`
-- `Az.Accounts` (5.1+) - provides WAM authentication support
+The following modules will be automatically installed when you first run `Start-PIMActivation`:
+- `Microsoft.Graph.Authentication` (2.29.0+)
+- `Microsoft.Graph.Users` (2.29.0+)
+- `Microsoft.Graph.Identity.DirectoryManagement` (2.29.0+)
+- `Microsoft.Graph.Identity.Governance` (2.29.0+)
+- `Microsoft.Graph.Groups` (2.29.0+)
+- `Microsoft.Graph.Identity.SignIns` (2.29.0+)
+- `Az.Accounts` (5.1.0+) - provides WAM authentication support
+
+**Note:** Dependencies are automatically resolved when you run `Start-PIMActivation`. If you encounter issues, try running the command with the `-Force` parameter for fully automated resolution.
 
 ### Microsoft Entra ID Permissions
 Your account needs the following **delegated** permissions:

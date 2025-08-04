@@ -115,9 +115,11 @@ function Get-MembershipType {
                 Write-Verbose "Checking eligible assignments for group membership indicators"
                 
                 try {
-                    $eligibleAssignments = Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance `
-                        -Filter "principalId eq '$($Assignment.PrincipalId)' and roleDefinitionId eq '$($Assignment.RoleDefinitionId)'" `
-                        -ErrorAction SilentlyContinue
+                    $eligibleParams = @{
+                        Filter = "principalId eq '$($Assignment.PrincipalId)' and roleDefinitionId eq '$($Assignment.RoleDefinitionId)'"
+                        ErrorAction = 'SilentlyContinue'
+                    }
+                    $eligibleAssignments = Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance @eligibleParams
                     
                     foreach ($eligible in $eligibleAssignments) {
                         if ($eligible.MemberType -in @('Group', 'Inherited', 'Transitive')) {

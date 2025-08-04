@@ -38,19 +38,19 @@ function Start-STAProcess {
     
     process {
         # Build parameter string from hashtable
-        $paramString = @()
+        $paramString = [System.Collections.ArrayList]::new()
         
         Write-Verbose "Processing $($Parameters.Count) parameter(s)"
         foreach ($key in $Parameters.Keys) {
             if ($Parameters[$key] -is [switch]) {
                 if ($Parameters[$key].IsPresent) {
-                    $paramString += "-$key"
+                    $null = $paramString.Add("-$key")
                     Write-Verbose "Added switch parameter: -$key"
                 }
             }
             else {
-                $paramString += "-$key"
-                $paramString += "`"$($Parameters[$key])`""
+                $null = $paramString.Add("-$key")
+                $null = $paramString.Add("`"$($Parameters[$key])`"")
                 Write-Verbose "Added parameter: -$key with value '$($Parameters[$key])'"
             }
         }

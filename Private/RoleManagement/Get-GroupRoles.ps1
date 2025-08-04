@@ -42,7 +42,7 @@ function Get-GroupRoles {
     )
     
     begin {
-        $roles = @()
+        $roles = [System.Collections.ArrayList]::new()
     }
     
     process {
@@ -53,9 +53,12 @@ function Get-GroupRoles {
             Write-Verbose "Querying eligible group memberships..."
             $eligibleGroups = $null
             try {
-                $eligibleGroups = Get-MgIdentityGovernancePrivilegedAccessGroupEligibilityScheduleInstance `
-                    -Filter "principalId eq '$UserId'" `
-                    -ExpandProperty "group" -ErrorAction Stop
+                $eligibleParams = @{
+                    Filter = "principalId eq '$UserId'"
+                    ExpandProperty = 'group'
+                    ErrorAction = 'Stop'
+                }
+                $eligibleGroups = Get-MgIdentityGovernancePrivilegedAccessGroupEligibilityScheduleInstance @eligibleParams
             }
             catch {
                 Write-Verbose "No eligible groups found or access denied: $($_.Exception.Message)"
@@ -71,7 +74,7 @@ function Get-GroupRoles {
                 if ($membership.Group) {
                     Write-Verbose "Processing eligible group: $($membership.Group.DisplayName) (Access: $($membership.AccessId))"
                     
-                    $roles += [PSCustomObject]@{
+                    $null = $roles.Add([PSCustomObject]@{
                         Id = $membership.GroupId
                         Name = $membership.Group.DisplayName
                         Type = 'Group'
@@ -85,7 +88,7 @@ function Get-GroupRoles {
                         DirectoryScopeId = $null
                         PrincipalId = $membership.PrincipalId
                         Assignment = $membership
-                    }
+                    })
                 }
             }
             
@@ -93,9 +96,12 @@ function Get-GroupRoles {
             Write-Verbose "Querying active group memberships..."
             $activeGroups = $null
             try {
-                $activeGroups = Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleInstance `
-                    -Filter "principalId eq '$UserId'" `
-                    -ExpandProperty "group" -ErrorAction Stop
+                $activeParams = @{
+                    Filter = "principalId eq '$UserId'"
+                    ExpandProperty = 'group'
+                    ErrorAction = 'Stop'
+                }
+                $activeGroups = Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleInstance @activeParams
             }
             catch {
                 Write-Verbose "No active groups found or access denied: $($_.Exception.Message)"
@@ -111,7 +117,7 @@ function Get-GroupRoles {
                 if ($membership.Group) {
                     Write-Verbose "Processing active group: $($membership.Group.DisplayName) (Access: $($membership.AccessId))"
                     
-                    $roles += [PSCustomObject]@{
+                    $null = $roles.Add([PSCustomObject]@{
                         Id = $membership.GroupId
                         Name = $membership.Group.DisplayName
                         Type = 'Group'
@@ -125,7 +131,7 @@ function Get-GroupRoles {
                         DirectoryScopeId = $null
                         PrincipalId = $membership.PrincipalId
                         Assignment = $membership
-                    }
+                    })
                 }
             }
             

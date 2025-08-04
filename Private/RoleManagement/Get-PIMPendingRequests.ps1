@@ -26,7 +26,7 @@ function Get-PIMPendingRequests {
         $UserId = $script:CurrentUser.Id
     }
     
-    $pendingRequests = @()
+    $pendingRequests = [System.Collections.ArrayList]::new()
     
     try {
         Write-Verbose "Retrieving pending Entra ID role requests for user: $UserId"
@@ -64,7 +64,7 @@ function Get-PIMPendingRequests {
                         ScheduleInfo = $request.ScheduleInfo
                     }
                     
-                    $pendingRequests += $pendingRequest
+                    $null = $pendingRequests.Add($pendingRequest)
                     Write-Verbose "Added pending Entra request: $($pendingRequest.RoleName) (ID: $($pendingRequest.RoleDefinitionId))"
                 }
                 catch {
@@ -82,7 +82,7 @@ function Get-PIMPendingRequests {
                         Justification = $request.Justification
                         ScheduleInfo = $request.ScheduleInfo
                     }
-                    $pendingRequests += $pendingRequest
+                    $null = $pendingRequests.Add($pendingRequest)
                     Write-Verbose "Added pending Entra request with unknown role name: $($pendingRequest.RoleDefinitionId)"
                 }
             }
@@ -110,7 +110,7 @@ function Get-PIMPendingRequests {
                         Justification = $request.Justification
                         ScheduleInfo = $request.ScheduleInfo
                     }
-                    $pendingRequests += $groupRequest
+                    $null = $pendingRequests.Add($groupRequest)
                     Write-Verbose "Added pending Group request: $($groupRequest.RoleName) (ID: $($groupRequest.GroupId))"
                 }
             }
