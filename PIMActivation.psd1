@@ -3,7 +3,7 @@
     RootModule = 'PIMActivation.psm1'
     
     # Version number of this module.
-    ModuleVersion = '1.2.2'
+    ModuleVersion = '1.2.3'
     
     # Supported PSEditions - Requires PowerShell Core (7+)
     CompatiblePSEditions = @('Core')
@@ -26,7 +26,11 @@
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion = '7.0'
     
-    # Modules are dynamically installed and imported by the module's initialization logic
+    # Script to run after the module is imported
+    ScriptsToProcess = @()
+    
+    # Required modules - conditionally enforced based on availability
+    # Auto-installation logic in PSM1 handles missing modules
     RequiredModules = @()
     
     # Functions to export from this module
@@ -60,13 +64,13 @@
             
             # ReleaseNotes
             ReleaseNotes = @'
-## PIMActivation v1.2.1
+## PIMActivation v1.2.3
 
-### � What's New
-- Enhanced automatic dependency resolution
-- Added -Force parameter for fully automated setup
-- Cleaner console output with reduced verbose noise
-- Improved error handling and user guidance
+### 🔧 What's Fixed
+- **Silent Import**: Module now imports completely silently unless verbose mode is enabled
+- **Dependency Management**: Fixed automatic installation of missing required modules during import
+- **Development Workflow**: Resolved import blocking issues for local development scenarios
+- **Performance**: Optimized dependency collection using ArrayLists for better performance
 
 ### � Full Release Notes
 For complete release notes, changelog, and detailed information:
@@ -84,9 +88,6 @@ PowerShell module for Microsoft Entra ID Privileged Identity Management (PIM) ro
 '@
             # Flag to indicate whether the module requires explicit user acceptance
             RequireLicenseAcceptance = $false
-            
-            # External module dependencies that are not captured by RequiredModules
-            ExternalModuleDependencies = @()
         }
     }
 }
