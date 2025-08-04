@@ -112,12 +112,6 @@ function Start-PIMActivation {
         }
         
         try {
-            # Validate module dependencies before proceeding
-            if (-not (Test-PIMModuleDependencies)) {
-                Write-Error "Required module dependencies are missing or incorrect. Please resolve dependencies before proceeding." -Category InvalidOperation
-                return
-            }
-            
             # Check if user wants to proceed with starting the PIM activation tool
             if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
                 Write-Verbose "Operation cancelled by user"

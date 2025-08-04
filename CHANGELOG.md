@@ -15,24 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.2.3] - 2025-08-04
-
-### Fixed
-- **Dependency Management**: Fixed automatic module installation for missing dependencies during import
-- **Silent Import**: Module import is now completely silent unless verbose mode is enabled
-- **Development Workflow**: Resolved issues with local module import blocking when dependencies were missing
-
-### Technical Improvements
-- **ArrayList Performance**: Optimized dependency collection using ArrayLists instead of regular arrays
-- **Quiet Installation**: Added silent installation with progress suppression for cleaner user experience
-- **Verbose Support**: Detailed output available via `-Verbose` parameter for troubleshooting
-- **Intelligent Installation**: Automatically configures NuGet provider and PSGallery trust as needed
-- **Progress Feedback**: Clear visual feedback during automatic module installation process
-- **Error Resilience**: Graceful handling of installation failures with helpful error messages
-- **Universal Compatibility**: Same codebase works for local development and PowerShell Gallery distribution
-
----
-
 ## [1.2.1] - 2025-08-04
 
 ### Added

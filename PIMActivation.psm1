@@ -1,6 +1,11 @@
 #Requires -Version 7.0
-# Note: Required modules are declared in the manifest and handled by internal dependency management
-# This allows for both PowerShell Gallery automatic installation and development scenarios
+#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Authentication'; ModuleVersion = '2.29.0' }
+#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Users'; ModuleVersion = '2.29.0' }
+#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Identity.DirectoryManagement'; ModuleVersion = '2.29.0' }
+#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Identity.Governance'; ModuleVersion = '2.29.0' }
+#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Groups'; ModuleVersion = '2.29.0' }
+#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Identity.SignIns'; ModuleVersion = '2.29.0' }
+#Requires -Modules @{ ModuleName = 'Az.Accounts'; ModuleVersion = '5.1.0' }
 
 # Set strict mode for better error handling
 Set-StrictMode -Version Latest
@@ -155,158 +160,9 @@ if ($Public -and $Public.Count -gt 0) {
 
 #region Module Initialization
 
-# Smart dependency resolution - handles both development and production scenarios
-# This allows the module to work regardless of how it's imported
-$script:DependenciesValidated = $false
-
-function Install-MissingPIMModules {
-    <#
-    .SYNOPSIS
-        Automatically installs missing required modules during import
-    #>
-    [CmdletBinding()]
-    param()
-    
-    $missingModules = [System.Collections.ArrayList]::new()
-    
-    # Check each required module
-    foreach ($moduleSpec in $script:RequiredModuleVersions.GetEnumerator()) {
-        $moduleName = $moduleSpec.Key
-        $requiredVersion = [version]$moduleSpec.Value
-        
-        # Check if suitable version is available
-        $availableModule = Get-Module -ListAvailable -Name $moduleName -ErrorAction SilentlyContinue | 
-            Where-Object { $_.Version -ge $requiredVersion } | 
-            Sort-Object Version -Descending | 
-            Select-Object -First 1
-            
-        if (-not $availableModule) {
-            $null = $missingModules.Add(@{
-                Name = $moduleName
-                RequiredVersion = $requiredVersion
-            })
-        }
-    }
-    
-    # Install missing modules if any
-    if ($missingModules.Count -gt 0) {
-        Write-Verbose "Installing missing dependencies..."
-        
-        # Ensure NuGet provider and PSGallery trust (silent setup)
-        $nugetProvider = Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue
-        if (-not $nugetProvider -or $nugetProvider.Version -lt '2.8.5.201') {
-            Write-Verbose "Installing NuGet provider..."
-            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction SilentlyContinue | Out-Null
-        }
-        
-        $psGallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
-        if ($psGallery.InstallationPolicy -ne 'Trusted') {
-            Write-Verbose "Configuring PSGallery as trusted..."
-            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
-        }
-        
-        # Install each missing module
-        foreach ($module in $missingModules) {
-            try {
-                Write-Verbose "Installing $($module.Name) v$($module.RequiredVersion)..."
-                $originalInformationPreference = $InformationPreference
-                $originalProgressPreference = $ProgressPreference
-                $InformationPreference = 'SilentlyContinue'
-                $ProgressPreference = 'SilentlyContinue'
-                
-                Install-Module -Name $module.Name -MinimumVersion $module.RequiredVersion -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop | Out-Null
-                
-                $InformationPreference = $originalInformationPreference
-                $ProgressPreference = $originalProgressPreference
-                Write-Verbose "Successfully installed $($module.Name)"
-            }
-            catch {
-                $InformationPreference = $originalInformationPreference
-                $ProgressPreference = $originalProgressPreference
-                Write-Warning "Failed to install $($module.Name): $($_.Exception.Message)"
-            }
-        }
-        
-        Write-Verbose "Dependencies installation completed."
-    }
-}
-
-function Test-PIMModuleDependencies {
-    <#
-    .SYNOPSIS
-        Internal function to validate and import required module dependencies
-    #>
-    [CmdletBinding()]
-    param()
-    
-    if ($script:DependenciesValidated) {
-        return $true
-    }
-    
-    # First, try to install any missing modules
-    try {
-        Install-MissingPIMModules
-    }
-    catch {
-        Write-Verbose "Module installation failed: $($_.Exception.Message)"
-    }
-    
-    # Now validate and import modules
-    $failedModules = [System.Collections.ArrayList]::new()
-    
-    foreach ($moduleSpec in $script:RequiredModuleVersions.GetEnumerator()) {
-        $moduleName = $moduleSpec.Key
-        $requiredVersion = [version]$moduleSpec.Value
-        
-        $loadedModule = Get-Module -Name $moduleName -ErrorAction SilentlyContinue
-        if (-not $loadedModule) {
-            $availableModule = Get-Module -ListAvailable -Name $moduleName | 
-                Where-Object { $_.Version -ge $requiredVersion } | 
-                Sort-Object Version -Descending | 
-                Select-Object -First 1
-                
-            if ($availableModule) {
-                try {
-                    Import-Module -Name $moduleName -MinimumVersion $requiredVersion -ErrorAction Stop -Force
-                    Write-Verbose "Imported $moduleName v$($availableModule.Version)"
-                }
-                catch {
-                    $null = $failedModules.Add("$moduleName (import failed: $($_.Exception.Message))")
-                }
-            }
-            else {
-                $null = $failedModules.Add("$moduleName v$requiredVersion+ (not available)")
-            }
-        }
-        elseif ($loadedModule.Version -lt $requiredVersion) {
-            $null = $failedModules.Add("$moduleName (loaded: v$($loadedModule.Version), required: v$requiredVersion+)")
-        }
-    }
-    
-    if ($failedModules.Count -gt 0) {
-        $errorMessage = @"
-Required module dependencies could not be resolved:
-$($failedModules | ForEach-Object { "  - $_" } | Out-String)
-Try running: Start-PIMActivation -Force
-"@
-        Write-Warning $errorMessage
-        return $false
-    }
-    
-    $script:DependenciesValidated = $true
-    return $true
-}
-
-# Attempt to resolve dependencies during module import (with error handling)
-try {
-    $null = Test-PIMModuleDependencies
-    Write-Verbose "PIMActivation module dependencies resolved successfully"
-}
-catch {
-    # Don't fail the import, just warn
-    Write-Warning "Dependency resolution during import encountered issues: $($_.Exception.Message)"
-    Write-Host "You can resolve this by running: Start-PIMActivation" -ForegroundColor Yellow
-}
+# Dependencies are loaded on-demand when Start-PIMActivation is called
+# This ensures clean module loading and avoids import-time dependency issues
+# All dependency management is handled automatically by Start-PIMActivation
 
 #endregion Module Initialization
 
