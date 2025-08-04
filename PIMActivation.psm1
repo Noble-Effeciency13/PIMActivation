@@ -1,11 +1,32 @@
 #Requires -Version 7.0
-#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Authentication'; ModuleVersion = '2.29.0' }
-#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Users'; ModuleVersion = '2.29.0' }
-#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Identity.DirectoryManagement'; ModuleVersion = '2.29.0' }
-#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Identity.Governance'; ModuleVersion = '2.29.0' }
-#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Groups'; ModuleVersion = '2.29.0' }
-#Requires -Modules @{ ModuleName = 'Microsoft.Graph.Identity.SignIns'; ModuleVersion = '2.29.0' }
-#Requires -Modules @{ ModuleName = 'Az.Accounts'; ModuleVersion = '5.1.0' }
+#Requires -Modules @{
+    ModuleName = 'Microsoft.Graph.Authentication'
+    ModuleVersion = '2.29.0'
+}
+#Requires -Modules @{
+    ModuleName = 'Microsoft.Graph.Users'
+    ModuleVersion = '2.29.0'
+}
+#Requires -Modules @{
+    ModuleName = 'Microsoft.Graph.Identity.DirectoryManagement'
+    ModuleVersion = '2.29.0'
+}
+#Requires -Modules @{
+    ModuleName = 'Microsoft.Graph.Identity.Governance'
+    ModuleVersion = '2.29.0'
+}
+#Requires -Modules @{
+    ModuleName = 'Microsoft.Graph.Groups'
+    ModuleVersion = '2.29.0'
+}
+#Requires -Modules @{
+    ModuleName = 'Microsoft.Graph.Identity.SignIns'
+    ModuleVersion = '2.29.0'
+}
+#Requires -Modules @{
+    ModuleName = 'Az.Accounts'
+    ModuleVersion = '5.1.0'
+}
 
 # Set strict mode for better error handling
 Set-StrictMode -Version Latest
@@ -152,9 +173,7 @@ $VerbosePreference = $originalVerbosePreference
 #region Export Module Members
 
 # Export public functions
-if ($Public -and $Public.Count -gt 0) {
-    Export-ModuleMember -Function $Public.BaseName -Alias *
-}
+Export-ModuleMember -Function $Public.BaseName -Alias *
 
 #endregion Export Module Members
 
