@@ -27,8 +27,21 @@ function Initialize-PIMModules {
         'Microsoft.Graph.Users' = '2.29.1'
         'Microsoft.Graph.Identity.DirectoryManagement' = '2.29.1'
         'Microsoft.Graph.Identity.Governance' = '2.29.1'
+        'Microsoft.Graph.Groups' = '2.29.1'
+        'Microsoft.Graph.Identity.SignIns' = '2.29.1'
         'Az.Accounts' = '5.1.0'
     }
+    
+    # All modules now use minimum version checking for better compatibility
+    $script:MinimumVersionModules = @(
+        'Microsoft.Graph.Authentication',
+        'Microsoft.Graph.Users', 
+        'Microsoft.Graph.Identity.DirectoryManagement',
+        'Microsoft.Graph.Identity.Governance',
+        'Microsoft.Graph.Groups',
+        'Microsoft.Graph.Identity.SignIns',
+        'Az.Accounts'
+    )
     
     $result = [PSCustomObject]@{
         Success = $true
@@ -57,16 +70,18 @@ function Initialize-PIMModules {
                 
                 # Restore verbose for our own output
                 $VerbosePreference = $currentVerbose
-                Write-Verbose "Checking availability of $moduleName version $requiredVersion"
+                Write-Verbose "Checking availability of $moduleName minimum version $requiredVersion"
                 $VerbosePreference = 'SilentlyContinue'
                 
+                # For all modules, check if we have the required version or higher
                 $availableModule = Get-Module -Name $moduleName -ListAvailable | 
-                    Where-Object { $_.Version -eq $requiredVersion } |
+                    Where-Object { $_.Version -ge [Version]$requiredVersion } |
+                    Sort-Object Version -Descending |
                     Select-Object -First 1
                 
                 if (-not $availableModule) {
                     $VerbosePreference = $currentVerbose
-                    $errorMsg = "Required module $moduleName version $requiredVersion is not installed. Please run: Install-Module -Name $moduleName -RequiredVersion $requiredVersion -Force"
+                    $errorMsg = "Required module $moduleName minimum version $requiredVersion is not installed. Please run: Install-Module -Name $moduleName -MinimumVersion $requiredVersion -Force"
                     Write-Error $errorMsg
                     $result.Success = $false
                     $result.Error = $errorMsg
@@ -114,7 +129,7 @@ function Import-PIMModule {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('Microsoft.Graph.Authentication', 'Microsoft.Graph.Users', 'Microsoft.Graph.Identity.DirectoryManagement', 'Microsoft.Graph.Identity.Governance', 'Az.Accounts')]
+        [ValidateSet('Microsoft.Graph.Authentication', 'Microsoft.Graph.Users', 'Microsoft.Graph.Identity.DirectoryManagement', 'Microsoft.Graph.Identity.Governance', 'Microsoft.Graph.Groups', 'Microsoft.Graph.Identity.SignIns', 'Az.Accounts')]
         [string]$ModuleName,
         
         [switch]$Force
@@ -138,28 +153,30 @@ function Import-PIMModule {
             # Remove any currently loaded versions of this module
             $loadedModule = Get-Module -Name $ModuleName
             if ($loadedModule) {
-                if ($loadedModule.Version -ne $requiredVersion) {
+                # For minimum version modules, check if loaded version meets requirement
+                if ($loadedModule.Version -lt [Version]$requiredVersion) {
                     # Restore verbose for our own output
                     $VerbosePreference = $currentVerbose
-                    Write-Verbose "Removing currently loaded version $($loadedModule.Version) of $ModuleName"
+                    Write-Verbose "Removing currently loaded version $($loadedModule.Version) of $ModuleName (below minimum $requiredVersion)"
                     $VerbosePreference = 'SilentlyContinue'
                     Remove-Module -Name $ModuleName -Force
                 } else {
                     $VerbosePreference = $currentVerbose
-                    Write-Verbose "$ModuleName version $requiredVersion is already loaded"
+                    Write-Verbose "$ModuleName version $($loadedModule.Version) is already loaded (meets minimum $requiredVersion)"
                     $script:ModuleLoadingState[$ModuleName] = 'Loaded'
                     return $true
                 }
             }
             
-            # Import the specific version
+            # Import the best available version that meets minimum requirements
             $moduleToImport = Get-Module -Name $ModuleName -ListAvailable | 
-                Where-Object { $_.Version -eq $requiredVersion } |
+                Where-Object { $_.Version -ge [Version]$requiredVersion } |
+                Sort-Object Version -Descending |
                 Select-Object -First 1
                 
             if (-not $moduleToImport) {
                 $VerbosePreference = $currentVerbose
-                throw "Required version $requiredVersion of $ModuleName is not available"
+                throw "Required minimum version $requiredVersion of $ModuleName is not available"
             }
             
             Import-Module -ModuleInfo $moduleToImport -Force -Global
@@ -171,7 +188,13 @@ function Import-PIMModule {
         
         $script:ModuleLoadingState[$ModuleName] = 'Loaded'
         
-        Write-Verbose "Successfully loaded $ModuleName version $requiredVersion"
+        # Get the actual loaded version for the success message
+        $actualLoadedModule = Get-Module -Name $ModuleName
+        if ($actualLoadedModule) {
+            Write-Verbose "Successfully loaded $ModuleName version $($actualLoadedModule.Version)"
+        } else {
+            Write-Verbose "Successfully loaded $ModuleName version $requiredVersion"
+        }
         return $true
         
     } catch {

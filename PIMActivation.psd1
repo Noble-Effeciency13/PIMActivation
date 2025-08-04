@@ -3,7 +3,7 @@
     RootModule = 'PIMActivation.psm1'
     
     # Version number of this module.
-    ModuleVersion = '1.2.3'
+    ModuleVersion = '1.2.4'
     
     # Supported PSEditions - Requires PowerShell Core (7+)
     CompatiblePSEditions = @('Core')
@@ -64,21 +64,25 @@
             
             # ReleaseNotes
             ReleaseNotes = @'
-## PIMActivation v1.2.3
+## PIMActivation v1.2.4
 
 ### 🔧 What's Fixed
-- **Silent Import**: Module now imports completely silently unless verbose mode is enabled
-- **Dependency Management**: Fixed automatic installation of missing required modules during import
-- **Development Workflow**: Resolved import blocking issues for local development scenarios
-- **Performance**: Optimized dependency collection using ArrayLists for better performance
+- **Module Compatibility**: Changed from exact version requirements to minimum version checking for all dependencies
+- **Missing Dependencies**: Added support for Microsoft.Graph.Groups and Microsoft.Graph.Identity.SignIns modules  
+- **Version Flexibility**: Module now accepts specified version or higher for better compatibility with existing installations
 
-### � Full Release Notes
+### ⚡ Key Improvements
+- **Az.Accounts**: Now requires minimum version 5.1.0 (was exact 5.1.0)
+- **Microsoft.Graph**: All Graph modules now use minimum version 2.29.1 (was exact 2.29.1)
+- **Smart Loading**: Automatically selects best available version that meets minimum requirements
+
+### 📚 Full Release Notes
 For complete release notes, changelog, and detailed information:
 - **GitHub Releases**: https://github.com/Noble-Effeciency13/PIMActivation/releases
 - **Changelog**: https://github.com/Noble-Effeciency13/PIMActivation/blob/main/CHANGELOG.md
 - **Documentation**: https://github.com/Noble-Effeciency13/PIMActivation/blob/main/README.md
 
-### � Getting Started
+### 🚀 Getting Started
 ```powershell
 Install-Module PIMActivation -Scope CurrentUser
 Start-PIMActivation

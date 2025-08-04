@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.4] - 2025-08-04
+
+### Fixed
+- **Module Compatibility**: Changed from exact version requirements to minimum version checking for all dependencies
+- **Missing Dependencies**: Added support for Microsoft.Graph.Groups and Microsoft.Graph.Identity.SignIns modules
+- **Version Flexibility**: Module now accepts specified version or higher for better compatibility with existing installations
+
+### Technical Improvements
+- **Minimum Version Logic**: All modules now use minimum version checking (`-ge`) instead of exact matching (`-eq`)
+- **Enhanced Error Messages**: Clear installation instructions for minimum version requirements
+- **Complete Module Coverage**: Ensured all required Graph modules are properly validated and loaded
+- **Future Compatibility**: Better support for newer module versions while maintaining stability
+
+### Changed
+- **Az.Accounts**: Now requires minimum version 5.1.0 (previously exact 5.1.0)
+- **Microsoft.Graph Modules**: All Graph modules now use minimum version 2.29.1 (previously exact 2.29.1)
+- **Module Loading**: Improved logic to select best available version that meets minimum requirements
+
+---
+
 ## [1.2.3] - 2025-08-04
 
 ### Fixed
