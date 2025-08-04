@@ -3,7 +3,7 @@
     RootModule = 'PIMActivation.psm1'
     
     # Version number of this module.
-    ModuleVersion = '1.2.1'
+    ModuleVersion = '1.2.2'
     
     # Supported PSEditions - Requires PowerShell Core (7+)
     CompatiblePSEditions = @('Core')
@@ -30,9 +30,9 @@
     RequiredModules = @()
     
     # Functions to export from this module
-FunctionsToExport = @(
-    'Start-PIMActivation'
-)
+    FunctionsToExport = @(
+        'Start-PIMActivation'
+    )
     
     # Cmdlets to export from this module
     CmdletsToExport = @()
