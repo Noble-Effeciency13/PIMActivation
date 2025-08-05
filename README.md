@@ -195,12 +195,12 @@ Start-PIMActivation -Verbose
 - **Azure Resource Roles**: Support for Azure subscription and resource-level PIM roles
 - **Profile Management**: Save and quickly activate frequently used role and account combinations
 - **Scheduling**: Plan role activations for future times
-- **Reporting**: Built-in activation history and analytics
 
-### Version 2.1.0 (Future)
-- **REST API Support**: Direct API calls for environments without PowerShell modules
-- **Cross-Platform**: Linux and macOS support with PowerShell 7+
-- **Automation**: PowerShell DSC and Azure Automation integration
+### Wishlist features
+- **Cross-Platform**: Linux and macOS Support
+- **Mobile app**: Mobile app for PIM Activations on the go
+- **Reporting**: Built-in activation history and analytics
+- **Automation integration**: Integration with different automation systems - still a liquid idea
 
 ## 🤝 Contributing
 
