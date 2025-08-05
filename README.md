@@ -198,6 +198,7 @@ Start-PIMActivation -Verbose
 
 ### Wishlist features
 - **Cross-Platform**: Linux and macOS Support
+- **Backwards compatibility**: Support for Powershell 5.1
 - **Mobile app**: Mobile app for PIM Activations on the go
 - **Reporting**: Built-in activation history and analytics
 - **Automation integration**: Integration with different automation systems - still a liquid idea
