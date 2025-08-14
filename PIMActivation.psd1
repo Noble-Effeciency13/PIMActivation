@@ -3,7 +3,7 @@
     RootModule = 'PIMActivation.psm1'
     
     # Version number of this module.
-    ModuleVersion = '1.2.4'
+    ModuleVersion = '1.2.5'
     
     # Supported PSEditions - Requires PowerShell Core (7+)
     CompatiblePSEditions = @('Core')
@@ -64,31 +64,24 @@
             
             # ReleaseNotes
             ReleaseNotes = @'
-## PIMActivation v1.2.4
+## PIMActivation v1.2.5
 
-### 🔧 What's Fixed
-- **Module Compatibility**: Changed from exact version requirements to minimum version checking for all dependencies
-- **Missing Dependencies**: Added support for Microsoft.Graph.Groups and Microsoft.Graph.Identity.SignIns modules  
-- **Version Flexibility**: Module now accepts specified version or higher for better compatibility with existing installations
+### 🔧 Fixes
+- Resolved Microsoft Graph query limitations when collecting role policies for large sets (e.g., >20 eligible roles of the same type). Implemented chunked batching and a REST-based path with pagination so policies are fetched reliably at scale.
+- Added robust fallback to per-item fetching when the service rejects complex filters or returns zero results.
+- Corrected control flow and ensured -ErrorAction Stop on policy assignment calls so fallbacks always trigger when needed.
+- Addressed a transient InvalidResource/InvalidFilter regression introduced during the fix and removed it.
 
-### ⚡ Key Improvements
-- **Az.Accounts**: Now requires minimum version 5.1.0 (was exact 5.1.0)
-- **Microsoft.Graph**: All Graph modules now use minimum version 2.29.1 (was exact 2.29.1)
-- **Smart Loading**: Automatically selects best available version that meets minimum requirements
+### ⚡ Improvements
+- Performance: Replaced array concatenations with ArrayList/AddRange in hot paths (role collection and batch aggregations).
+- Stability: Flattened ArrayList before mapping policies; treat InvalidResource like InvalidFilter for resilient behavior.
+- Caching: Memoized scope and AU display name lookups in Get-ScopeDisplayName to reduce repeated Graph calls.
 
-### 📚 Full Release Notes
-For complete release notes, changelog, and detailed information:
-- **GitHub Releases**: https://github.com/Noble-Effeciency13/PIMActivation/releases
-- **Changelog**: https://github.com/Noble-Effeciency13/PIMActivation/blob/main/CHANGELOG.md
-- **Documentation**: https://github.com/Noble-Effeciency13/PIMActivation/blob/main/README.md
+### 📚 More
+- Changelog: https://github.com/Noble-Effeciency13/PIMActivation/blob/main/CHANGELOG.md
+- Releases:  https://github.com/Noble-Effeciency13/PIMActivation/releases
 
-### 🚀 Getting Started
-```powershell
-Install-Module PIMActivation -Scope CurrentUser
-Start-PIMActivation
-```
-
-PowerShell module for Microsoft Entra ID Privileged Identity Management (PIM) role activations through a modern GUI interface.
+PowerShell module for Microsoft Entra ID PIM role activations with a modern GUI. Requires PowerShell 7+.
 '@
             # Flag to indicate whether the module requires explicit user acceptance
             RequireLicenseAcceptance = $false

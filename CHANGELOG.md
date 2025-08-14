@@ -15,6 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.5] - 2025-08-13
+
+### Fixed
+- **Graph Query Limitation**: Resolved policy retrieval issues for large role sets (e.g., >20 eligible roles of the same type) using chunked batching and a REST-based path with pagination for reliable results at scale.
+- **Fallback Behavior**: Ensured robust per-item fallback when complex filters are rejected or return zero results.
+- **Control Flow**: Corrected `Get-PIMPoliciesBatch` logic and applied `-ErrorAction Stop` so fallbacks trigger consistently.
+- **Regression Removal**: Eliminated a transient 400 InvalidResource/InvalidFilter regression introduced during iteration.
+
+### Technical Improvements
+- **ArrayList Performance**: Replaced array concatenation with ArrayList/AddRange in hot paths (Get-PIMRoles and batch aggregations).
+- **Enumeration Stability**: Flattened ArrayList before mapping policies to avoid incorrect enumeration.
+- **Resilient Error Handling**: Treated InvalidResource the same as InvalidFilter for more resilient behavior across tenants.
+- **Memoization**: Added caching in Get-ScopeDisplayName for AU names and scope strings to reduce repeat Graph calls.
+
+---
+
 ## [1.2.4] - 2025-08-04
 
 ### Fixed

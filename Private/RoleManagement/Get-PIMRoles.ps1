@@ -49,7 +49,7 @@ function Get-PIMRoles {
     Write-Verbose "Starting PIM role retrieval for user: $(if ($UserId) { $UserId } else { 'current user' })"
     Write-Verbose "Role types requested - Entra: $IncludeEntraRoles, Groups: $IncludeGroups, Azure: $IncludeAzureResources"
     
-    $allRoles = @()
+    $allRoles = [System.Collections.ArrayList]::new()
     
     # Get Entra ID directory roles
     if ($IncludeEntraRoles) {
@@ -69,7 +69,7 @@ function Get-PIMRoles {
             Write-Verbose "Successfully retrieved $roleCount Entra ID role(s)"
             
             if ($roleCount -gt 0) {
-                $allRoles += $entraRoles
+                try { $allRoles.AddRange($entraRoles) | Out-Null } catch { foreach ($r in $entraRoles) { [void]$allRoles.Add($r) } }
             }
         }
         catch {
@@ -96,7 +96,7 @@ function Get-PIMRoles {
             Write-Verbose "Successfully retrieved $roleCount group role(s)"
             
             if ($roleCount -gt 0) {
-                $allRoles += $groupRoles
+                try { $allRoles.AddRange($groupRoles) | Out-Null } catch { foreach ($r in $groupRoles) { [void]$allRoles.Add($r) } }
             }
         }
         catch {
@@ -110,11 +110,12 @@ function Get-PIMRoles {
         Write-Verbose "Retrieving Azure resource roles..."
         try {
             $azureRoles = Get-AzureResourceRoles -UserId $UserId
+            if ($null -eq $azureRoles) { $azureRoles = @() } elseif ($azureRoles -isnot [array]) { $azureRoles = @($azureRoles) }
             $roleCount = $azureRoles.Count
             Write-Verbose "Successfully retrieved $roleCount Azure resource role(s)"
             
-            if ($azureRoles) {
-                $allRoles += $azureRoles
+            if ($roleCount -gt 0) {
+                try { $allRoles.AddRange($azureRoles) | Out-Null } catch { foreach ($r in $azureRoles) { [void]$allRoles.Add($r) } }
             }
         }
         catch {
