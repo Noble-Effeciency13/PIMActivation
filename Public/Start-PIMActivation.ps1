@@ -95,7 +95,13 @@ function Start-PIMActivation {
         [switch]$Force,
         
         [Parameter(HelpMessage = "Disable automatic dependency resolution and require manual intervention")]
-        [switch]$ManualDependencyCheck
+        [switch]$ManualDependencyCheck,
+
+        [Parameter(HelpMessage = "Client ID of the app registration to use for Graph auth")]
+        [string]$ClientId,
+
+        [Parameter(HelpMessage = "Tenant ID to use with the specified app registration")]
+        [string]$TenantId
     )
     
     begin {
@@ -259,8 +265,15 @@ function Start-PIMActivation {
                 Write-Verbose "Connecting to Microsoft services"
                 Update-LoadingStatus -SplashForm $splashForm -Status "Connecting to Microsoft Graph..." -Progress 50
                 
+                # Build params only if explicitly provided
                 $connectionParams = @{
                     IncludeEntraRoles = $script:IncludeEntraRoles
+                }
+                if ($PSBoundParameters.ContainsKey('ClientId') -and $ClientId) {
+                    $connectionParams.ClientId = $ClientId
+                }
+                if ($PSBoundParameters.ContainsKey('TenantId') -and $TenantId) {
+                    $connectionParams.TenantId = $TenantId
                 }
                 
                 Update-LoadingStatus -SplashForm $splashForm -Status "Authenticating user..." -Progress 60

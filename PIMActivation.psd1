@@ -3,7 +3,7 @@
     RootModule = 'PIMActivation.psm1'
     
     # Version number of this module.
-    ModuleVersion = '1.2.5'
+    ModuleVersion = '1.2.6'
     
     # Supported PSEditions - Requires PowerShell Core (7+)
     CompatiblePSEditions = @('Core')
@@ -64,18 +64,21 @@
             
             # ReleaseNotes
             ReleaseNotes = @'
-## PIMActivation v1.2.5
+## PIMActivation v1.2.6
+
+### ✅ Added
+- Support for custom app registration for Microsoft Graph delegated auth. New parameters `ClientId` and `TenantId` are available on `Start-PIMActivation` and `Connect-PIMServices`. When both are provided, the module authenticates using the specified app registration; otherwise, it falls back to the default interactive flow.
 
 ### 🔧 Fixes
 - Resolved Microsoft Graph query limitations when collecting role policies for large sets (e.g., >20 eligible roles of the same type). Implemented chunked batching and a REST-based path with pagination so policies are fetched reliably at scale.
 - Added robust fallback to per-item fetching when the service rejects complex filters or returns zero results.
-- Corrected control flow and ensured -ErrorAction Stop on policy assignment calls so fallbacks always trigger when needed.
+- Corrected control flow and ensured `-ErrorAction Stop` on policy assignment calls so fallbacks always trigger when needed.
 - Addressed a transient InvalidResource/InvalidFilter regression introduced during the fix and removed it.
 
 ### ⚡ Improvements
-- Performance: Replaced array concatenations with ArrayList/AddRange in hot paths (role collection and batch aggregations).
-- Stability: Flattened ArrayList before mapping policies; treat InvalidResource like InvalidFilter for resilient behavior.
-- Caching: Memoized scope and AU display name lookups in Get-ScopeDisplayName to reduce repeated Graph calls.
+- Performance: Replaced array concatenations with `ArrayList`/`AddRange` in hot paths (role collection and batch aggregations).
+- Stability: Flattened `ArrayList` before mapping policies; treat `InvalidResource` like `InvalidFilter` for resilient behavior.
+- Caching: Memoized scope and AU display name lookups in `Get-ScopeDisplayName` to reduce repeated Graph calls.
 
 ### 📚 More
 - Changelog: https://github.com/Noble-Effeciency13/PIMActivation/blob/main/CHANGELOG.md

@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.6] - 2025-11-27
+
+### Added
+- **Support for custom App registration**: New parameters ClientId and TenantId on Start-PIMActivation and Connect-PIMServices. Providing both will cause Connect-MgGraph to use the specified custom app registration for delegated auth; otherwise it falls back to the original interactive flow.
+
+### Notes
+- App-only auth (client secret/cert) is not enabled; PIM operations pstill require delegated permissions.
+
+---
+
 ## [1.2.5] - 2025-08-13
 
 ### Fixed

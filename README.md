@@ -63,6 +63,15 @@ Start-PIMActivation
 
 On first launch, you'll be prompted to authenticate with Microsoft Graph using your organizational account.
 
+### Use a specific app registration (optional)
+If your organization requires using a dedicated app registration for delegated auth, provide ClientId and TenantId:
+
+```powershell
+Start-PIMActivation -ClientId "<appId>" -TenantId "<tenantId>"
+```
+
+When both are provided, authentication uses the supplied app; otherwise, the default interactive flow is used.
+
 ## 📋 Prerequisites
 
 ### System Requirements
@@ -105,6 +114,9 @@ Your account needs the following **delegated** permissions:
 ```powershell
 # Launch with default settings (Entra roles and groups)
 Start-PIMActivation
+
+# Use a specific app registration for delegated auth
+Start-PIMActivation -ClientId "<appId>" -TenantId "<tenantId>"
 
 # Show only Entra ID directory roles
 Start-PIMActivation -IncludeEntraRoles
