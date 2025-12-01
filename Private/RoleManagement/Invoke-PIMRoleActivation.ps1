@@ -1074,7 +1074,11 @@ public class PIMAuthContextHelper
         $referencedAssemblies += @("netstandard", "System.Linq", "System.Threading.Tasks")
         
         # Get the access token with WAM
-        $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph PowerShell
+        $clientId = if ($script:StartupParameters.ClientId) { 
+            $script:StartupParameters.ClientId 
+        } else { 
+            "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph PowerShell fallback
+        }
         $redirectUri = "http://localhost"
         $scopes = @("https://graph.microsoft.com/.default")
         
