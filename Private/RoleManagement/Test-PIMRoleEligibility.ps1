@@ -51,10 +51,10 @@ function Test-PIMRoleEligibility {
     
     # Initialize result object
     $result = [PSCustomObject]@{
-        IsEligible = $false
+        IsEligible    = $false
         EligibilityId = $null
-        Details = $null
-        Error = $null
+        Details       = $null
+        Error         = $null
     }
     
     try {

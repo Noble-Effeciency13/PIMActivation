@@ -49,11 +49,11 @@ function Show-TopMostMessageBox {
     
     # Create a temporary form to ensure MessageBox appears on top
     $tempForm = New-Object System.Windows.Forms.Form -Property @{
-        TopMost = $true
-        WindowState = 'Minimized'
+        TopMost       = $true
+        WindowState   = 'Minimized'
         ShowInTaskbar = $false
-        Size = [System.Drawing.Size]::new(0, 0)
-        Location = [System.Drawing.Point]::new(-1000, -1000)
+        Size          = [System.Drawing.Size]::new(0, 0)
+        Location      = [System.Drawing.Point]::new(-1000, -1000)
     }
     
     try {

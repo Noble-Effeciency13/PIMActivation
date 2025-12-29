@@ -64,20 +64,21 @@ if (-not (Test-Path Variable:script:RoleCacheValidityMinutes)) {
 
 # Authentication context variables - now supporting multiple contexts
 $script:CurrentAuthContextToken = $null  # Deprecated - kept for backwards compatibility
-$script:AuthContextTokens = @{}  # New: Hashtable of contextId -> token
+$script:AuthContextTokens = @{} 
 $script:JustCompletedAuthContext = $null
 $script:AuthContextCompletionTime = $null
 
 # Module loading state for just-in-time loading
 $script:ModuleLoadingState = @{}
 $script:RequiredModuleVersions = @{
-    'Microsoft.Graph.Authentication' = '2.29.0'
-    'Microsoft.Graph.Users' = '2.29.0'
+    'Microsoft.Graph.Authentication'               = '2.29.0'
+    'Microsoft.Graph.Users'                        = '2.29.0'
     'Microsoft.Graph.Identity.DirectoryManagement' = '2.29.0'
-    'Microsoft.Graph.Identity.Governance' = '2.29.0'
-    'Microsoft.Graph.Groups' = '2.29.0'
-    'Microsoft.Graph.Identity.SignIns' = '2.29.0'
-    'Az.Accounts' = '5.1.0'
+    'Microsoft.Graph.Identity.Governance'          = '2.29.0'
+    'Microsoft.Graph.Groups'                       = '2.29.0'
+    'Microsoft.Graph.Identity.SignIns'             = '2.29.0'
+#    'Az.Accounts'                                  = '5.1.0'
+#    'Az.Resources'                                 = '6.0.0'
 }
 
 #endregion Module Setup
@@ -87,11 +88,11 @@ $script:RequiredModuleVersions = @{
 # Import all functions from subdirectories
 $functionFolders = [System.Collections.ArrayList]::new()
 $null = $functionFolders.AddRange(@(
-    'Authentication',
-    'RoleManagement', 
-    'UI',
-    'Utilities'
-))
+        'Authentication',
+        'RoleManagement', 
+        'UI',
+        'Utilities'
+    ))
 
 # Note: Profiles folder contains placeholder functions for planned features
 $null = $functionFolders.Add('Profiles')
@@ -101,41 +102,32 @@ $null = $functionFolders.Add('Profiles')
 $originalVerbosePreference = $VerbosePreference
 $VerbosePreference = 'SilentlyContinue'
 
-foreach ($folder in $functionFolders) {
-    $folderPath = Join-Path -Path "$script:ModuleRoot\Private" -ChildPath $folder
-    if (Test-Path -Path $folderPath) {
-        $functions = Get-ChildItem -Path $folderPath -Filter '*.ps1' -File -ErrorAction SilentlyContinue
-        
-        foreach ($function in $functions) {
-            try {
-                . $function.FullName
-            }
-            catch {
-                Write-Error -Message "Failed to import function $($function.FullName): $_"
-            }
+# Import all private functions from any subfolder
+$privateRoot = Join-Path $script:ModuleRoot 'Private'
+if (Test-Path -Path $privateRoot) {
+    $privateFiles = Get-ChildItem -Path $privateRoot -Filter '*.ps1' -Recurse -ErrorAction SilentlyContinue | Where-Object { $_ -is [System.IO.FileInfo] }
+    foreach ($file in $privateFiles) {
+        try {
+            . $file.FullName
+        }
+        catch {
+            Write-Error -Message "Failed to import function $($file.FullName): $_"
         }
     }
 }
 
-# Import remaining private functions from root Private folder
-$privateRoot = Get-ChildItem -Path "$script:ModuleRoot\Private" -Filter '*.ps1' -File -ErrorAction SilentlyContinue
-foreach ($import in $privateRoot) {
-    try {
-        . $import.FullName
-    }
-    catch {
-        Write-Error -Message "Failed to import function $($import.FullName): $_"
-    }
-}
-
-# Import public functions
-$Public = @(Get-ChildItem -Path "$script:ModuleRoot\Public" -Filter '*.ps1' -File -ErrorAction SilentlyContinue)
-foreach ($import in $Public) {
-    try {
-        . $import.FullName
-    }
-    catch {
-        Write-Error -Message "Failed to import function $($import.FullName): $_"
+# Import all public functions from any subfolder (if you ever nest them)
+$publicRoot = Join-Path $script:ModuleRoot 'Public'
+$Public = @()
+if (Test-Path -Path $publicRoot) {
+    $Public = Get-ChildItem -Path $publicRoot -Filter '*.ps1' -Recurse -ErrorAction SilentlyContinue | Where-Object { $_ -is [System.IO.FileInfo] }
+    foreach ($import in $Public) {
+        try {
+            . $import.FullName
+        }
+        catch {
+            Write-Error -Message "Failed to import function $($import.FullName): $_"
+        }
     }
 }
 
@@ -146,9 +138,13 @@ $VerbosePreference = $originalVerbosePreference
 
 #region Export Module Members
 
-# Export public functions
-if ($Public -and $Public.Count -gt 0) {
-    Export-ModuleMember -Function $Public.BaseName -Alias *
+# Export public functions by filename
+if ($Public) {
+    $publicFiles = @($Public)
+    $functionNames = $publicFiles.BaseName | Sort-Object -Unique
+    if ($functionNames) {
+        Export-ModuleMember -Function $functionNames -Alias *
+    }
 }
 
 #endregion Export Module Members
@@ -159,154 +155,8 @@ if ($Public -and $Public.Count -gt 0) {
 # This allows the module to work regardless of how it's imported
 $script:DependenciesValidated = $false
 
-function Install-MissingPIMModules {
-    <#
-    .SYNOPSIS
-        Automatically installs missing required modules during import
-    #>
-    [CmdletBinding()]
-    param()
-    
-    $missingModules = [System.Collections.ArrayList]::new()
-    
-    # Check each required module
-    foreach ($moduleSpec in $script:RequiredModuleVersions.GetEnumerator()) {
-        $moduleName = $moduleSpec.Key
-        $requiredVersion = [version]$moduleSpec.Value
-        
-        # Check if suitable version is available
-        $availableModule = Get-Module -ListAvailable -Name $moduleName -ErrorAction SilentlyContinue | 
-            Where-Object { $_.Version -ge $requiredVersion } | 
-            Sort-Object Version -Descending | 
-            Select-Object -First 1
-            
-        if (-not $availableModule) {
-            $null = $missingModules.Add(@{
-                Name = $moduleName
-                RequiredVersion = $requiredVersion
-            })
-        }
-    }
-    
-    # Install missing modules if any
-    if ($missingModules.Count -gt 0) {
-        Write-Verbose "Installing missing dependencies..."
-        
-        # Ensure NuGet provider and PSGallery trust (silent setup)
-        $nugetProvider = Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue
-        if (-not $nugetProvider -or $nugetProvider.Version -lt '2.8.5.201') {
-            Write-Verbose "Installing NuGet provider..."
-            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction SilentlyContinue | Out-Null
-        }
-        
-        $psGallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
-        if ($psGallery.InstallationPolicy -ne 'Trusted') {
-            Write-Verbose "Configuring PSGallery as trusted..."
-            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
-        }
-        
-        # Install each missing module
-        foreach ($module in $missingModules) {
-            try {
-                Write-Verbose "Installing $($module.Name) v$($module.RequiredVersion)..."
-                $originalInformationPreference = $InformationPreference
-                $originalProgressPreference = $ProgressPreference
-                $InformationPreference = 'SilentlyContinue'
-                $ProgressPreference = 'SilentlyContinue'
-                
-                Install-Module -Name $module.Name -MinimumVersion $module.RequiredVersion -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop | Out-Null
-                
-                $InformationPreference = $originalInformationPreference
-                $ProgressPreference = $originalProgressPreference
-                Write-Verbose "Successfully installed $($module.Name)"
-            }
-            catch {
-                $InformationPreference = $originalInformationPreference
-                $ProgressPreference = $originalProgressPreference
-                Write-Warning "Failed to install $($module.Name): $($_.Exception.Message)"
-            }
-        }
-        
-        Write-Verbose "Dependencies installation completed."
-    }
-}
-
-function Test-PIMModuleDependencies {
-    <#
-    .SYNOPSIS
-        Internal function to validate and import required module dependencies
-    #>
-    [CmdletBinding()]
-    param()
-    
-    if ($script:DependenciesValidated) {
-        return $true
-    }
-    
-    # First, try to install any missing modules
-    try {
-        Install-MissingPIMModules
-    }
-    catch {
-        Write-Verbose "Module installation failed: $($_.Exception.Message)"
-    }
-    
-    # Now validate and import modules
-    $failedModules = [System.Collections.ArrayList]::new()
-    
-    foreach ($moduleSpec in $script:RequiredModuleVersions.GetEnumerator()) {
-        $moduleName = $moduleSpec.Key
-        $requiredVersion = [version]$moduleSpec.Value
-        
-        $loadedModule = Get-Module -Name $moduleName -ErrorAction SilentlyContinue
-        if (-not $loadedModule) {
-            $availableModule = Get-Module -ListAvailable -Name $moduleName | 
-                Where-Object { $_.Version -ge $requiredVersion } | 
-                Sort-Object Version -Descending | 
-                Select-Object -First 1
-                
-            if ($availableModule) {
-                try {
-                    Import-Module -Name $moduleName -MinimumVersion $requiredVersion -ErrorAction Stop -Force
-                    Write-Verbose "Imported $moduleName v$($availableModule.Version)"
-                }
-                catch {
-                    $null = $failedModules.Add("$moduleName (import failed: $($_.Exception.Message))")
-                }
-            }
-            else {
-                $null = $failedModules.Add("$moduleName v$requiredVersion+ (not available)")
-            }
-        }
-        elseif ($loadedModule.Version -lt $requiredVersion) {
-            $null = $failedModules.Add("$moduleName (loaded: v$($loadedModule.Version), required: v$requiredVersion+)")
-        }
-    }
-    
-    if ($failedModules.Count -gt 0) {
-        $errorMessage = @"
-Required module dependencies could not be resolved:
-$($failedModules | ForEach-Object { "  - $_" } | Out-String)
-Try running: Start-PIMActivation -Force
-"@
-        Write-Warning $errorMessage
-        return $false
-    }
-    
-    $script:DependenciesValidated = $true
-    return $true
-}
-
-# Attempt to resolve dependencies during module import (with error handling)
-try {
-    $null = Test-PIMModuleDependencies
-    Write-Verbose "PIMActivation module dependencies resolved successfully"
-}
-catch {
-    # Don't fail the import, just warn
-    Write-Warning "Dependency resolution during import encountered issues: $($_.Exception.Message)"
-    Write-Host "You can resolve this by running: Start-PIMActivation" -ForegroundColor Yellow
-}
+Write-Verbose "PIMActivation module loaded. Use Start-PIMActivation to begin."
+Write-Verbose "Dependencies will be validated and installed automatically when needed."
 
 #endregion Module Initialization
 

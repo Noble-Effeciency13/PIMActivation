@@ -8,10 +8,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned Features
-- **Azure Resource Roles**: Support for Azure subscription and resource-level PIM roles
 - **Profile Management**: Save and quickly activate frequently used role combinations and accounts
 - **Scheduling**: Plan role activations for future times
 - **Enhanced Reporting**: Built-in activation history and analytics
+
+---
+
+## [2.0.0] - 2025-12-29
+
+### 🚀 Major New Features - Azure Resources Support
+- **Azure Resource Roles Support**: Complete integration with Azure Resource PIM for subscription, resource group, and individual resource role management
+- **Enhanced Role Display**: Azure roles display with `[Azure]` prefix and Entra portal-aligned resource/scope column mappings
+- **Cross-Subscription Support**: Automatic enumeration and role management across all accessible Azure subscriptions
+- **Intelligent Member Type Detection**: Advanced logic to distinguish between Direct and Inherited Azure role assignments based on scope hierarchy
+
+### ⚡ Parallel Processing Engine
+- **Parallel Processing by Default**: High-performance concurrent execution for Azure, Entra, and Group policy operations
+- **Enhanced Verbose Output**: Real-time progress tracking with emoji indicators (✅, ❌) and timing metrics
+- **Intuitive Parameter Model**: Simple `DisableParallelProcessing` switch for users who prefer sequential processing
+- **Thread-Safe Operations**: ConcurrentBag and ConcurrentDictionary implementation for safe parallel result aggregation
+- **Smart Throttling**: Default ThrottleLimit of 10 concurrent operations with configurable limits up to 50
+
+### 🏗️ Modular Architecture Enhancement
+- **Function File Separation**: Split monolithic module function files into individual function files for better maintainability and development workflow
+- **Organized Directory Structure**: Functions properly organized into Public, Private, UI, and RoleManagement folders
+- **Enhanced Module Loading**: Improved module initialization with proper function loading and dependency management
+- **Development Workflow**: Better code organization enabling easier collaborative development and testing
+- **Strengthened Folder Structure**: Added sub-folders for enhanced visability, maintainability and structure for the module
+
+### ✅ Added
+- **Complete Azure Resource Integration**: New `Get-AzureResourceRoles` function providing comprehensive Azure role enumeration with deduplication
+- **Azure Module Management**: `Initialize-AzureResourceSupport` function for automatic Az.Accounts and Az.Resources module handling
+- **Advanced Scope Parsing**: Intelligent parsing of Azure ARM resource hierarchies (Tenant → Management Group → Subscription → Resource Group → Resource)
+- **PIM-Eligible Role Detection**: Support for both PIM-eligible and permanently active Azure Resource role assignments
+- **Enhanced UI Support**: Azure roles integrate seamlessly with existing role lists showing proper resource names and scope types
+- **Select All Button**: New UI button for quickly selecting all eligible roles for bulk activation
+- **Parallel Processing Support**: Concurrent execution for Azure subscriptions, Entra policies, and Group policies
+- **Real-Time Progress Tracking**: Enhanced verbose output with emoji indicators and performance timing metrics
+- **DisableParallelProcessing Parameter**: Optional switch to use sequential processing when needed
+
+### ⚡ Enhanced Performance Features
+All v1.2.x performance optimizations maintained and extended to Azure resources:
+- **ArrayList Collections**: Optimal memory usage for large role sets across all role types
+- **Batch API Operations**: 85% reduction in API calls for role and policy retrieval
+- **Memoized Lookups**: Cached scope display name resolution to minimize repeated API calls
+- **Intelligent Deduplication**: Advanced role deduplication logic prevents duplicate Azure role entries
+- **Progressive Loading**: Granular progress tracking during Azure subscription enumeration
+- **Parallel Execution**: Concurrent operations across all role types and policy fetching for maximum performance
+
+### 🔧 Enhanced Authentication
+- **Dual Context Management**: Simultaneous Microsoft Graph and Azure PowerShell authentication contexts
+- **Custom App Registration**: Preserved support for ClientId/TenantId parameters for custom app registrations
+- **Error Handling**: Comprehensive error handling for Azure authentication failures with informative user feedback
+- **Session State**: Proper cleanup and management of both Graph and Azure authentication sessions
+
+### 🛠️ Technical Improvements
+- **Parallel Processing Architecture**: Concurrent execution engine built on PowerShell 7+ ForEach-Object -Parallel
+- **Modular File Structure**: Each function now in its own .ps1 file for better organization and maintainability
+- **Enhanced Error Handling**: Comprehensive error handling across all operations with informative user feedback
+- **Memory Optimization**: Efficient resource usage and proper cleanup across all operations
+
+### 📋 Technical Requirements
+- **PowerShell 7.0+**: Maintained existing PowerShell Core requirement for parallel processing capabilities
+- **Az.Accounts 5.1.0+**: Auto-installed when Azure resources functionality is requested
+- **Az.Resources 6.0.0+**: Auto-installed for PIM role eligibility schedule access
+- **Microsoft Graph Modules**: Existing Graph PowerShell module requirements preserved
+
+### 🏗️ Architecture Improvements
+- **Modular Design**: Azure functionality cleanly integrated without impacting existing Entra ID and Group role processing
+- **Function Separation**: Complete restructuring into individual function files for enhanced maintainability
+- **Backward Compatibility**: All existing parameters and functionality preserved - purely additive changes
+- **Resource Type Abstraction**: Unified role object model supports Entra, Group, and Azure resource roles seamlessly
+- **Scope Hierarchy**: Advanced scope parsing supports complex Azure resource hierarchies and inheritance patterns
+- **Performance Optimization**: Parallel processing architecture provides dramatic speed improvements
+
+### 💡 User Experience Enhancements
+- **Default Fast Performance**: Users get optimal performance out-of-the-box without configuration
+- **Flexible Control**: Users can disable parallel processing if needed for troubleshooting or compatibility
+- **Informative Messages**: Enhanced verbose output explains why sequential processing is used when parallel is disabled
+
+### 📚 Documentation
+- **Comprehensive Examples**: Updated documentation with Azure resource role activation scenarios and parallel processing
+- **Best Practices**: Guidance for managing roles across multiple Azure subscriptions and optimizing performance
+- **Troubleshooting**: Common Azure authentication, permission issues, and parallel processing scenarios addressed
+- **Performance Best Practices**: Guidance on when to use parallel vs sequential processing
+- **Updated Parameter Documentation**: All functions now document DisableParallelProcessing and updated ThrottleLimit defaults
+
+### 🚨 Breaking Changes
+- **New Parameter**: Added `DisableParallelProcessing` switch (parallel processing enabled by default)
+- **Module Structure**: Functions moved to individual files (no impact on public API)
 
 ---
 

@@ -46,7 +46,8 @@ function Clear-AuthenticationCache {
             if (Test-Path $cacheFolder) {
                 Remove-Item -Path "$cacheFolder\*" -Force -Recurse -ErrorAction SilentlyContinue
                 Write-Verbose "Successfully cleared MSAL token cache from: $cacheFolder"
-            } else {
+            }
+            else {
                 Write-Verbose "MSAL token cache folder not found - no cache to clear"
             }
         }

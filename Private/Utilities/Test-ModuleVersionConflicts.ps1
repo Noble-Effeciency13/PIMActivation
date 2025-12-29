@@ -39,13 +39,13 @@ function Test-ModuleVersionConflicts {
     )
     
     $result = [PSCustomObject]@{
-        HasConflicts = $false
-        Conflicts = [System.Collections.ArrayList]::new()
-        Recommendations = [System.Collections.ArrayList]::new()
-        SafeToProceed = $true
+        HasConflicts            = $false
+        Conflicts               = [System.Collections.ArrayList]::new()
+        Recommendations         = [System.Collections.ArrayList]::new()
+        SafeToProceed           = $true
         AutoResolutionAttempted = $false
-        AutoResolutionSuccess = $false
-        ActionsPerformed = [System.Collections.ArrayList]::new()
+        AutoResolutionSuccess   = $false
+        ActionsPerformed        = [System.Collections.ArrayList]::new()
     }
     
     Write-Verbose "Checking for module version conflicts..."
@@ -64,11 +64,11 @@ function Test-ModuleVersionConflicts {
                     Write-Verbose "Version conflict detected: $moduleName v$loadedVersion (loaded) < v$requiredVersion (required)"
                     
                     $conflict = [PSCustomObject]@{
-                        ModuleName = $moduleName
-                        LoadedVersion = $loadedVersion
+                        ModuleName      = $moduleName
+                        LoadedVersion   = $loadedVersion
                         RequiredVersion = $requiredVersion
-                        ConflictType = 'IncompatibleVersion'
-                        Severity = 'High'
+                        ConflictType    = 'IncompatibleVersion'
+                        Severity        = 'High'
                     }
                     
                     $null = $result.Conflicts.Add($conflict)
@@ -79,11 +79,11 @@ function Test-ModuleVersionConflicts {
                     Write-Verbose "Newer version detected: $moduleName v$loadedVersion (loaded) > v$requiredVersion (required)"
                     
                     $conflict = [PSCustomObject]@{
-                        ModuleName = $moduleName
-                        LoadedVersion = $loadedVersion
+                        ModuleName      = $moduleName
+                        LoadedVersion   = $loadedVersion
                         RequiredVersion = $requiredVersion
-                        ConflictType = 'NewerVersion'
-                        Severity = 'Low'
+                        ConflictType    = 'NewerVersion'
+                        Severity        = 'Low'
                     }
                     
                     $null = $result.Conflicts.Add($conflict)

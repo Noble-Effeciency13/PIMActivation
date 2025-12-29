@@ -39,19 +39,19 @@ function Clear-ModuleVersionConflicts {
                     try {
                         Remove-Module -Name $module.Name -Force -ErrorAction Stop
                         $null = $removedModules.Add([PSCustomObject]@{
-                            Name = $module.Name
-                            Version = $module.Version
-                            Status = 'Removed'
-                        })
+                                Name    = $module.Name
+                                Version = $module.Version
+                                Status  = 'Removed'
+                            })
                     }
                     catch {
                         Write-Warning "Failed to remove module $($module.Name): $($_.Exception.Message)"
                         $null = $removedModules.Add([PSCustomObject]@{
-                            Name = $module.Name
-                            Version = $module.Version
-                            Status = 'Failed'
-                            Error = $_.Exception.Message
-                        })
+                                Name    = $module.Name
+                                Version = $module.Version
+                                Status  = 'Failed'
+                                Error   = $_.Exception.Message
+                            })
                     }
                 }
             }

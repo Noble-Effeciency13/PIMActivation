@@ -45,9 +45,9 @@ function Get-EntraIDRoles {
         # Get eligible role assignments
         Write-Verbose "Querying eligible role assignments..."
         $eligibleParams = @{
-            Filter = "principalId eq '$UserId'"
+            Filter         = "principalId eq '$UserId'"
             ExpandProperty = 'roleDefinition'
-            ErrorAction = 'Stop'
+            ErrorAction    = 'Stop'
         }
         $eligibleAssignments = Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance @eligibleParams
         
@@ -63,31 +63,32 @@ function Get-EntraIDRoles {
                     "Inherited" { "Inherited" }
                     default { $assignment.MemberType }
                 }
-            } else {
+            }
+            else {
                 "Direct"
             }
             
             $null = $roles.Add([PSCustomObject]@{
-                Id = $assignment.RoleDefinitionId
-                Name = $assignment.RoleDefinition.DisplayName
-                Type = 'Entra'
-                Status = 'Eligible'
-                Source = 'EntraID'
-                ResourceId = $null
-                ResourceName = 'Entra ID Directory'
-                StartDateTime = $assignment.StartDateTime
-                EndDateTime = $assignment.EndDateTime
-                MemberType = $memberType  # ADD THIS
-                DirectoryScopeId = $assignment.DirectoryScopeId
-                PrincipalId = $assignment.PrincipalId
-                Assignment = $assignment
-            })
+                    Id               = $assignment.RoleDefinitionId
+                    Name             = $assignment.RoleDefinition.DisplayName
+                    Type             = 'Entra'
+                    Status           = 'Eligible'
+                    Source           = 'EntraID'
+                    ResourceId       = $null
+                    ResourceName     = 'Entra ID Directory'
+                    StartDateTime    = $assignment.StartDateTime
+                    EndDateTime      = $assignment.EndDateTime
+                    MemberType       = $memberType  # ADD THIS
+                    DirectoryScopeId = $assignment.DirectoryScopeId
+                    PrincipalId      = $assignment.PrincipalId
+                    Assignment       = $assignment
+                })
         }
         
         # Get active role assignments
         Write-Verbose "Querying active role assignments..."
         $activeParams = @{
-            Filter = "principalId eq '$UserId'"
+            Filter      = "principalId eq '$UserId'"
             ErrorAction = 'Stop'
         }
         $activeAssignments = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance @activeParams
@@ -102,20 +103,20 @@ function Get-EntraIDRoles {
                 
                 if ($roleDetails) {
                     $null = $roles.Add([PSCustomObject]@{
-                        Id = $assignment.RoleDefinitionId
-                        Name = $roleDetails.DisplayName
-                        Type = 'Entra'
-                        Status = 'Active'
-                        Source = 'EntraID'
-                        ResourceId = $null
-                        ResourceName = 'Entra ID Directory'
-                        StartDateTime = $assignment.StartDateTime
-                        EndDateTime = $assignment.EndDateTime
-                        MemberType = $assignment.MemberType
-                        DirectoryScopeId = $assignment.DirectoryScopeId
-                        PrincipalId = $assignment.PrincipalId
-                        Assignment = $assignment
-                    })
+                            Id               = $assignment.RoleDefinitionId
+                            Name             = $roleDetails.DisplayName
+                            Type             = 'Entra'
+                            Status           = 'Active'
+                            Source           = 'EntraID'
+                            ResourceId       = $null
+                            ResourceName     = 'Entra ID Directory'
+                            StartDateTime    = $assignment.StartDateTime
+                            EndDateTime      = $assignment.EndDateTime
+                            MemberType       = $assignment.MemberType
+                            DirectoryScopeId = $assignment.DirectoryScopeId
+                            PrincipalId      = $assignment.PrincipalId
+                            Assignment       = $assignment
+                        })
                 }
             }
             catch {

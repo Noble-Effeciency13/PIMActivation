@@ -41,9 +41,9 @@ function Show-PIMActivationDialog {
     # Initialize result object
     $result = [PSCustomObject]@{
         Justification = ""
-        TicketNumber = ""
-        TicketSystem = "ServiceNow"
-        Cancelled = $true
+        TicketNumber  = ""
+        TicketSystem  = "ServiceNow"
+        Cancelled     = $true
     }
     
     # Create main form
@@ -66,10 +66,10 @@ function Show-PIMActivationDialog {
         $labelText = if ($RequiresJustification) { "Justification (required):" } else { "Justification (optional - recommended):" }
         
         $lblJust = New-Object System.Windows.Forms.Label -Property @{
-            Text     = $labelText
-            Location = [System.Drawing.Point]::new(10, $y)
-            Size     = [System.Drawing.Size]::new(460, 20)
-            Font     = [System.Drawing.Font]::new("Segoe UI", 9)
+            Text      = $labelText
+            Location  = [System.Drawing.Point]::new(10, $y)
+            Size      = [System.Drawing.Size]::new(460, 20)
+            Font      = [System.Drawing.Font]::new("Segoe UI", 9)
             ForeColor = [System.Drawing.Color]::FromArgb(32, 31, 30)
         }
         $y += 25
@@ -93,18 +93,18 @@ function Show-PIMActivationDialog {
     # Add ticket field if required
     if ($RequiresTicket) {
         $lblTicket = New-Object System.Windows.Forms.Label -Property @{
-            Text = "Ticket Number *"
+            Text     = "Ticket Number *"
             Location = [System.Drawing.Point]::new(10, $y)
-            Size = [System.Drawing.Size]::new(120, 23)
-            Font = [System.Drawing.Font]::new("Segoe UI", 9)
+            Size     = [System.Drawing.Size]::new(120, 23)
+            Font     = [System.Drawing.Font]::new("Segoe UI", 9)
         }
         $form.Controls.Add($lblTicket)
         
         $txtTicket = New-Object System.Windows.Forms.TextBox -Property @{
-            Name = "txtTicket"
+            Name     = "txtTicket"
             Location = [System.Drawing.Point]::new(130, $y)
-            Size = [System.Drawing.Size]::new(280, 23)
-            Font = [System.Drawing.Font]::new("Segoe UI", 9)
+            Size     = [System.Drawing.Size]::new(280, 23)
+            Font     = [System.Drawing.Font]::new("Segoe UI", 9)
         }
         $form.Controls.Add($txtTicket)
         
@@ -112,18 +112,18 @@ function Show-PIMActivationDialog {
         
         # Add ticket system dropdown
         $lblTicketSystem = New-Object System.Windows.Forms.Label -Property @{
-            Text = "Ticket System"
+            Text     = "Ticket System"
             Location = [System.Drawing.Point]::new(10, $y)
-            Size = [System.Drawing.Size]::new(120, 23)
-            Font = [System.Drawing.Font]::new("Segoe UI", 9)
+            Size     = [System.Drawing.Size]::new(120, 23)
+            Font     = [System.Drawing.Font]::new("Segoe UI", 9)
         }
         $form.Controls.Add($lblTicketSystem)
         
         $cmbTicketSystem = New-Object System.Windows.Forms.ComboBox -Property @{
-            Name = "cmbTicketSystem"
-            Location = [System.Drawing.Point]::new(130, $y)
-            Size = [System.Drawing.Size]::new(280, 23)
-            Font = [System.Drawing.Font]::new("Segoe UI", 9)
+            Name          = "cmbTicketSystem"
+            Location      = [System.Drawing.Point]::new(130, $y)
+            Size          = [System.Drawing.Size]::new(280, 23)
+            Font          = [System.Drawing.Font]::new("Segoe UI", 9)
             DropDownStyle = 'DropDownList'
         }
         
@@ -135,7 +135,8 @@ function Show-PIMActivationDialog {
         $savedSystem = Get-SavedTicketSystem
         if ($savedSystem -and $ticketSystems -contains $savedSystem) {
             $cmbTicketSystem.SelectedItem = $savedSystem
-        } else {
+        }
+        else {
             $cmbTicketSystem.SelectedIndex = 0  # Default to ServiceNow
         }
         
@@ -147,11 +148,11 @@ function Show-PIMActivationDialog {
     # Add optional justification note
     if ($OptionalJustification -and -not $RequiresJustification) {
         $lblNote = New-Object System.Windows.Forms.Label -Property @{
-            Text     = "Note: While justification is optional, providing a clear reason helps with audit trails."
-            Location = [System.Drawing.Point]::new(10, $y)
-            Size     = [System.Drawing.Size]::new(460, 40)
+            Text      = "Note: While justification is optional, providing a clear reason helps with audit trails."
+            Location  = [System.Drawing.Point]::new(10, $y)
+            Size      = [System.Drawing.Size]::new(460, 40)
             ForeColor = [System.Drawing.Color]::FromArgb(96, 94, 92)
-            Font     = [System.Drawing.Font]::new("Segoe UI", 8)
+            Font      = [System.Drawing.Font]::new("Segoe UI", 8)
         }
         $y += 45
         $form.Controls.Add($lblNote)
@@ -177,51 +178,51 @@ function Show-PIMActivationDialog {
     
     # Validate required fields on OK click
     $okButton.Add_Click({
-        $isValid = $true
-        $validationMessage = ""
+            $isValid = $true
+            $validationMessage = ""
         
-        # Validate ticket if required
-        if ($RequiresTicket) {
-            $ticketText = $form.Controls["txtTicket"].Text.Trim()
-            if ([string]::IsNullOrWhiteSpace($ticketText)) {
-                $isValid = $false
-                $validationMessage += "Ticket number is required.{0}" -f [Environment]::NewLine
-            }
-        }
-        
-        # Validate justification if required
-        if ($RequiresJustification -and $justificationControl -and [string]::IsNullOrWhiteSpace($justificationControl.Text)) {
-            Show-TopMostMessageBox -Message "Justification is required for these roles." -Title "Validation Error" -Icon Warning
-            $_.Cancel = $true
-            return
-        }
-        
-        if ($RequiresTicket -and $txtTicket -and [string]::IsNullOrWhiteSpace($txtTicket.Text)) {
-            Show-TopMostMessageBox -Message "Ticket number is required for these roles." -Title "Validation Error" -Icon Warning
-            $_.Cancel = $true
-            return
-        }
-        
-        if ($isValid) {
-            # Set result values
-            $result.Justification = if ($justificationControl) { $justificationControl.Text.Trim() } else { "" }
-            
+            # Validate ticket if required
             if ($RequiresTicket) {
-                $result.TicketNumber = $form.Controls["txtTicket"].Text.Trim()
-                $result.TicketSystem = $cmbTicketSystem.SelectedItem.ToString()
-                
-                # Save ticket system preference
-                Save-TicketSystemPreference -System $result.TicketSystem
+                $ticketText = $form.Controls["txtTicket"].Text.Trim()
+                if ([string]::IsNullOrWhiteSpace($ticketText)) {
+                    $isValid = $false
+                    $validationMessage += "Ticket number is required.{0}" -f [Environment]::NewLine
+                }
             }
+        
+            # Validate justification if required
+            if ($RequiresJustification -and $justificationControl -and [string]::IsNullOrWhiteSpace($justificationControl.Text)) {
+                Show-TopMostMessageBox -Message "Justification is required for these roles." -Title "Validation Error" -Icon Warning
+                $_.Cancel = $true
+                return
+            }
+        
+            if ($RequiresTicket -and $txtTicket -and [string]::IsNullOrWhiteSpace($txtTicket.Text)) {
+                Show-TopMostMessageBox -Message "Ticket number is required for these roles." -Title "Validation Error" -Icon Warning
+                $_.Cancel = $true
+                return
+            }
+        
+            if ($isValid) {
+                # Set result values
+                $result.Justification = if ($justificationControl) { $justificationControl.Text.Trim() } else { "" }
             
-            $result.Cancelled = $false
-            $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
-            $form.Close()
-        }
-        else {
-            Show-TopMostMessageBox -Message $validationMessage.TrimEnd() -Title "Validation Error" -Icon Warning
-        }
-    })
+                if ($RequiresTicket) {
+                    $result.TicketNumber = $form.Controls["txtTicket"].Text.Trim()
+                    $result.TicketSystem = $cmbTicketSystem.SelectedItem.ToString()
+                
+                    # Save ticket system preference
+                    Save-TicketSystemPreference -System $result.TicketSystem
+                }
+            
+                $result.Cancelled = $false
+                $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
+                $form.Close()
+            }
+            else {
+                Show-TopMostMessageBox -Message $validationMessage.TrimEnd() -Title "Validation Error" -Icon Warning
+            }
+        })
     
     # Create Cancel button with styling
     $cancelButton = New-Object System.Windows.Forms.Button -Property @{
@@ -248,11 +249,11 @@ function Show-PIMActivationDialog {
     
     # Ensure the form is brought to front and activated
     $form.Add_Shown({
-        $this.Activate()
-        $this.BringToFront()
-        $this.TopMost = $true
-        $this.Focus()
-    })
+            $this.Activate()
+            $this.BringToFront()
+            $this.TopMost = $true
+            $this.Focus()
+        })
 
     # Show dialog and process result
     $dialogResult = $form.ShowDialog()
@@ -265,81 +266,11 @@ function Show-PIMActivationDialog {
         if ($RequiresTicket -and $txtTicket -and -not [string]::IsNullOrWhiteSpace($txtTicket.Text)) {
             $result.TicketNumber = $txtTicket.Text
         }
-    } else {
+    }
+    else {
         $result.Cancelled = $true
     }
     
     $form.Dispose()
     return $result
-}
-
-function Get-SavedTicketSystem {
-    <#
-    .SYNOPSIS
-        Retrieves the last used ticket system preference.
-    
-    .DESCRIPTION
-        Gets the saved ticket system preference from the user's local profile.
-    
-    .OUTPUTS
-        String - The saved ticket system name, or $null if not found.
-    #>
-    [CmdletBinding()]
-    param()
-    
-    $prefsPath = Join-Path $env:LOCALAPPDATA "PIMActivation\preferences.json"
-    
-    if (Test-Path $prefsPath) {
-        try {
-            $prefs = Get-Content $prefsPath -Raw | ConvertFrom-Json
-            return $prefs.TicketSystem
-        }
-        catch {
-            Write-Verbose "Failed to load ticket system preference: $_"
-        }
-    }
-    
-    return $null
-}
-
-function Save-TicketSystemPreference {
-    <#
-    .SYNOPSIS
-        Saves the user's ticket system preference.
-    
-    .PARAMETER System
-        The ticket system name to save.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$System
-    )
-    
-    $prefsDir = Join-Path $env:LOCALAPPDATA "PIMActivation"
-    $prefsPath = Join-Path $prefsDir "preferences.json"
-    
-    # Ensure directory exists
-    if (-not (Test-Path $prefsDir)) {
-        New-Item -ItemType Directory -Path $prefsDir -Force | Out-Null
-    }
-    
-    try {
-        # Load existing preferences or create new
-        $prefs = if (Test-Path $prefsPath) {
-            Get-Content $prefsPath -Raw | ConvertFrom-Json
-        } else {
-            [PSCustomObject]@{}
-        }
-        
-        # Update ticket system
-        $prefs | Add-Member -NotePropertyName TicketSystem -NotePropertyValue $System -Force
-        
-        # Save
-        $prefs | ConvertTo-Json | Set-Content $prefsPath -Force
-        Write-Verbose "Saved ticket system preference: $System"
-    }
-    catch {
-        Write-Warning "Failed to save ticket system preference: $_"
-    }
 }

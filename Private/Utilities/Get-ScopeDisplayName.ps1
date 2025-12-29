@@ -59,7 +59,8 @@ function Get-ScopeDisplayName {
                 $au = Get-MgDirectoryAdministrativeUnit -AdministrativeUnitId $auId -ErrorAction Stop
                 if ($au) {
                     $script:AuNameCache[$auId] = $au.DisplayName
-                } else {
+                }
+                else {
                     $script:AuNameCache[$auId] = $null
                 }
             }

@@ -37,11 +37,11 @@ function Resolve-PIMDependencies {
     )
     
     $result = [PSCustomObject]@{
-        Success = $false
-        RequiredRestart = $false
+        Success          = $false
+        RequiredRestart  = $false
         ActionsPerformed = [System.Collections.ArrayList]::new()
-        Errors = [System.Collections.ArrayList]::new()
-        RetryCount = 0
+        Errors           = [System.Collections.ArrayList]::new()
+        RetryCount       = 0
     }
     
     Write-Verbose "Starting automatic dependency resolution..."
@@ -100,14 +100,14 @@ function Resolve-PIMDependencies {
             foreach ($moduleName in $script:RequiredModuleVersions.Keys) {
                 $requiredVersion = [version]$script:RequiredModuleVersions[$moduleName]
                 $availableModule = Get-Module -ListAvailable -Name $moduleName | 
-                    Where-Object { $_.Version -ge $requiredVersion } | 
-                    Select-Object -First 1
+                Where-Object { $_.Version -ge $requiredVersion } | 
+                Select-Object -First 1
                 
                 if (-not $availableModule) {
                     $null = $missingModules.Add(@{
-                        Name = $moduleName
-                        RequiredVersion = $requiredVersion
-                    })
+                            Name            = $moduleName
+                            RequiredVersion = $requiredVersion
+                        })
                 }
             }
             

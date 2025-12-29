@@ -25,15 +25,15 @@ function Test-PIMDependencies {
     )
     
     $result = [PSCustomObject]@{
-        OverallStatus = 'Unknown'
-        PowerShellVersion = [PSCustomObject]@{
-            Current = $PSVersionTable.PSVersion
-            Required = [version]'7.0'
+        OverallStatus      = 'Unknown'
+        PowerShellVersion  = [PSCustomObject]@{
+            Current    = $PSVersionTable.PSVersion
+            Required   = [version]'7.0'
             Compatible = $false
         }
-        ModuleStatus = [System.Collections.ArrayList]::new()
-        Conflicts = [System.Collections.ArrayList]::new()
-        Recommendations = [System.Collections.ArrayList]::new()
+        ModuleStatus       = [System.Collections.ArrayList]::new()
+        Conflicts          = [System.Collections.ArrayList]::new()
+        Recommendations    = [System.Collections.ArrayList]::new()
         ReadyForActivation = $false
     }
     
@@ -54,13 +54,13 @@ function Test-PIMDependencies {
     else {
         # Fallback if called outside module context
         $requiredVersions = @{
-            'Microsoft.Graph.Authentication' = '2.29.0'
-            'Microsoft.Graph.Users' = '2.29.0'
+            'Microsoft.Graph.Authentication'               = '2.29.0'
+            'Microsoft.Graph.Users'                        = '2.29.0'
             'Microsoft.Graph.Identity.DirectoryManagement' = '2.29.0'
-            'Microsoft.Graph.Identity.Governance' = '2.29.0'
-            'Microsoft.Graph.Groups' = '2.29.0'
-            'Microsoft.Graph.Identity.SignIns' = '2.29.0'
-            'Az.Accounts' = '5.1.0'
+            'Microsoft.Graph.Identity.Governance'          = '2.29.0'
+            'Microsoft.Graph.Groups'                       = '2.29.0'
+            'Microsoft.Graph.Identity.SignIns'             = '2.29.0'
+            'Az.Accounts'                                  = '5.1.0'
         }
     }
     
@@ -70,14 +70,14 @@ function Test-PIMDependencies {
         $availableModules = Get-Module -ListAvailable -Name $moduleName -ErrorAction SilentlyContinue
         
         $moduleStatus = [PSCustomObject]@{
-            Name = $moduleName
-            RequiredVersion = $requiredVersion
-            LoadedVersion = if ($loadedModule) { $loadedModule.Version } else { $null }
+            Name              = $moduleName
+            RequiredVersion   = $requiredVersion
+            LoadedVersion     = if ($loadedModule) { $loadedModule.Version } else { $null }
             AvailableVersions = if ($availableModules) { $availableModules.Version | Sort-Object -Descending } else { @() }
-            Status = 'Unknown'
-            Loaded = [bool]$loadedModule
-            Available = [bool]$availableModules
-            VersionConflict = $false
+            Status            = 'Unknown'
+            Loaded            = [bool]$loadedModule
+            Available         = [bool]$availableModules
+            VersionConflict   = $false
         }
         
         # Determine status
