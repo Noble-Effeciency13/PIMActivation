@@ -47,14 +47,19 @@ function Disconnect-PIMServices {
         Write-Verbose "Successfully disconnected from Microsoft Graph"
         
         # Disconnect from Azure if connected
-        if ($script:IncludeAzureResources -and (Get-Module -Name Az.Accounts -ErrorAction SilentlyContinue)) {
-            Write-Verbose "Azure resources are included and Az.Accounts module is available"
-            Write-Verbose "Attempting to disconnect from Azure"
-            $null = Disconnect-AzAccount -ErrorAction SilentlyContinue
-            Write-Verbose "Successfully disconnected from Azure"
+        try {
+            $azContext = Get-AzContext -ErrorAction SilentlyContinue
+            if ($azContext) {
+                Write-Verbose "Disconnecting from Azure Resource Manager"
+                Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
+                Write-Verbose "Successfully disconnected from Azure Resource Manager"
+            }
+            else {
+                Write-Verbose "Azure disconnection skipped (not connected or module not available)"
+            }
         }
-        else {
-            Write-Verbose "Azure disconnection skipped (not connected or module not available)"
+        catch {
+            Write-Verbose "Error during Azure disconnection: $($_.Exception.Message)"
         }
         
         Write-Verbose "PIM services disconnection completed successfully"

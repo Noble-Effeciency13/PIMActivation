@@ -7,19 +7,23 @@ SHORT DESCRIPTION
 
 LONG DESCRIPTION
     The PIMActivation module provides a modern Windows Forms-based interface
-    for activating eligible PIM roles in Microsoft Entra ID (formerly Azure AD)
-    and PIM-enabled groups. It simplifies the process of discovering and
-    activating multiple roles simultaneously while respecting policy requirements.
+    for activating eligible PIM roles across Microsoft Entra ID, PIM-enabled
+    groups, and Azure Resource roles. It features a high-performance parallel
+    processing engine and simplifies the process of discovering and activating
+    multiple roles simultaneously while respecting policy requirements.
 
     Key Features:
-    - Graphical user interface for easy role management
-    - High-performance batch API operations for fast role loading
+    - Modern graphical user interface with Select All functionality
+    - High-performance parallel processing engine (default enabled)
+    - Real-time progress tracking with emoji indicators and timing metrics
+    - Batch API operations with 85% reduction in API calls
     - Intelligent duplicate role handling with group attribution
-    - Support for Entra ID directory roles
+    - Support for Microsoft Entra ID directory roles
     - Support for PIM-enabled security groups
-    - Optional support for Azure resource roles
+    - Complete Azure Resource roles support (subscriptions, resource groups, resources)
+    - Cross-subscription Azure role enumeration with silent SSO
     - Multi-select capability for bulk activations
-    - Configurable activation duration (1-24 hours)
+    - Configurable activation duration (30 minutes to 24 hours)
     - Group-role relationship visibility and attribution
     - Automatic handling of policy requirements:
       * Multi-factor authentication (MFA)
@@ -30,26 +34,45 @@ LONG DESCRIPTION
     - Real-time view of active and eligible roles
     - Account switching without restarting
     - Enhanced cache management with proper invalidation
+    - Thread-safe parallel operations with configurable throttling
 
 EXAMPLES
-    # Launch with default settings (Entra roles and Groups)
+    # Launch with default settings (parallel processing enabled)
     Start-PIMActivation
 
-    # Include only Entra ID roles
+    # Include only Entra ID roles with fast parallel processing
     Start-PIMActivation -IncludeEntraRoles
 
     # Include only PIM-enabled groups
     Start-PIMActivation -IncludeGroups
 
-    # Include all role types including Azure resources
+    # Include all role types including Azure resources (recommended)
     Start-PIMActivation -IncludeEntraRoles -IncludeGroups -IncludeAzureResources
 
+    # Customize parallel processing performance
+    Start-PIMActivation -IncludeAzureResources -ThrottleLimit 15
+
+    # Disable parallel processing for troubleshooting
+    Start-PIMActivation -DisableParallelProcessing
+
+    # Enable verbose output to see parallel processing performance
+    Start-PIMActivation -IncludeAzureResources -Verbose
+
+    # Use custom app registration for delegated authentication
+    Start-PIMActivation -ClientId "<appId>" -TenantId "<tenantId>"
+
 REQUIREMENTS
-    - PowerShell 7+ (Download from https://aka.ms/powershell)
-    - Windows operating system (for Windows Forms support)
-    - Microsoft.Graph PowerShell modules
-    - Appropriate permissions in Entra ID
-    - Az.Accounts module (optional, for Azure resource roles)
+    - PowerShell 7+ (required for parallel processing engine)
+    - Windows operating system (Windows 10/11 recommended for optimal performance)
+    - Microsoft.Graph PowerShell modules (auto-installed)
+    - Az.Accounts 5.1.0+ and Az.Resources 6.0.0+ (auto-installed for Azure resources)
+    - Appropriate permissions in Entra ID:
+      * RoleEligibilitySchedule.ReadWrite.Directory
+      * RoleAssignmentSchedule.ReadWrite.Directory
+      * RoleManagementPolicy.Read.Directory
+      * PrivilegedAccess.ReadWrite.AzureADGroup
+      * Azure RBAC Reader or higher (for Azure resource roles)
+    - .NET Framework 4.7.2+ (for Windows Forms support)
 
 INSTALLATION
     Install-Module -Name PIMActivation -Scope CurrentUser
@@ -61,15 +84,28 @@ TROUBLESHOOTING
        - Ensure you have the required permissions
        - Check if Microsoft.Graph modules are installed
        - Verify network connectivity
+       - Try: Disconnect-MgGraph; Start-PIMActivation
 
     2. "No eligible roles found"
        - Verify you have PIM-eligible role assignments
        - Check if the correct role types are enabled
        - Ensure PIM is enabled in your tenant
+       - For Azure roles: Verify subscription access
 
-    3. "Az.Accounts module not found"
-       - This is only required for Azure resource roles
-       - Install with: Install-Module -Name Az.Accounts
+    3. "Slow performance or timeouts"
+       - Parallel processing is enabled by default
+       - Try reducing ThrottleLimit: Start-PIMActivation -ThrottleLimit 5
+       - Check verbose output: Start-PIMActivation -Verbose
+
+    4. "Azure roles not loading"
+       - Az.Accounts and Az.Resources modules are auto-installed
+       - Verify Azure subscription access
+       - Check Azure RBAC permissions
+
+    5. "Parallel processing issues"
+       - Disable for troubleshooting: Start-PIMActivation -DisableParallelProcessing
+       - PowerShell 7+ required for parallel processing
+       - Check verbose output for detailed progress information
 
 KEYWORDS
     PIM
@@ -79,8 +115,14 @@ KEYWORDS
     Role Activation
     RBAC
     Identity Governance
+    Parallel Processing
+    Azure Resources
+    Bulk Activation
+    Performance
 
 SEE ALSO
     Start-PIMActivation
+    Get-Help Start-PIMActivation -Full
     https://github.com/Noble-Effeciency13/PIMActivation
+    https://www.chanceofsecurity.com/post/microsoft-entra-pim-bulk-role-activation-tool
     https://docs.microsoft.com/azure/active-directory/privileged-identity-management/

@@ -5,7 +5,7 @@
 [![Publish to PowerShell Gallery](https://github.com/Noble-Effeciency13/PIMActivation/actions/workflows/PSGalleryPublish.yml/badge.svg)](https://github.com/Noble-Effeciency13/PIMActivation/actions/workflows/PSGalleryPublish.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A comprehensive PowerShell module for managing Microsoft Entra ID Privileged Identity Management (PIM) role activations through an intuitive graphical interface. Streamline your privileged access workflows with support for authentication context, bulk activations, and policy compliance.
+A comprehensive PowerShell module for managing Privileged Identity Management (PIM) role activations across Microsoft Entra ID, PIM-enabled groups, and Azure Resources through an intuitive graphical interface. Streamline your privileged access workflows with support for authentication context, bulk activations, and policy compliance across your entire Azure and Microsoft 365 environment.
 
 > 📖 **Read the full blog post**: [PIMActivation: The Ultimate Tool for Microsoft Entra PIM Bulk Role Activation](https://www.chanceofsecurity.com/post/microsoft-entra-pim-bulk-role-activation-tool) on [Chance of Security](https://www.chanceofsecurity.com/)
 
@@ -16,16 +16,16 @@ A comprehensive PowerShell module for managing Microsoft Entra ID Privileged Ide
 ## ✨ Key Features
 
 - 🎨 **Modern GUI Interface** - Clean, responsive Windows Forms application with real-time updates
-- 🔐 **Multi-Role Support** - Activate Microsoft Entra ID roles and PIM-enabled security groups
-- ⚡ **Bulk Operations** - Select and activate multiple roles simultaneously with policy validation
-- 🚀 **High-Performance Batch API** - 85% reduction in API calls through intelligent batching and caching
+- 🔐 **Multi-Role Support** - Activate Microsoft Entra ID roles, PIM-enabled security groups, and Azure Resource roles
+- ⚡ **Parallel Processing Engine** - Lightning-fast parallel execution with real-time progress tracking and emoji indicators
+- 🚀 **High-Performance Batch API** - 85% reduction in API calls through intelligent batching, caching, and concurrent operations
 - 🎯 **Advanced Duplicate Role Handling** - Sophisticated MemberType-based classification system for managing roles with multiple assignment paths
 - 🛡️ **Authentication Context Support** - Seamless handling of Conditional Access authentication context requirements
 - ⏱️ **Flexible Duration** - Configurable activation periods from 30 minutes to 24 hours, depending on policy maximum
 - 📋 **Policy Compliance** - Automatic detection and handling of MFA, justification, and ticket requirements
 - 🔄 **Up-to-Date Snapshot** - Shows current active and pending assignments based on the latest refresh or user action
 - 👤 **Account Management** - Easy account switching without application restart
-- 🔧 **PowerShell Compatibility** - Requires PowerShell 7+ for optimal performance and modern language features
+- 🔧 **PowerShell Compatibility** - Requires PowerShell 7+ for optimal parallel processing performance and modern language features
 
 ## 📸 Screenshots
 
@@ -81,13 +81,18 @@ When both are provided, authentication uses the supplied app; otherwise, the def
 
 ### Required PowerShell Modules
 The following modules will be automatically installed when you first run `Start-PIMActivation`:
+
+#### Microsoft Graph (for Entra ID and Groups)
 - `Microsoft.Graph.Authentication` (2.29.0+)
 - `Microsoft.Graph.Users` (2.29.0+)
 - `Microsoft.Graph.Identity.DirectoryManagement` (2.29.0+)
 - `Microsoft.Graph.Identity.Governance` (2.29.0+)
 - `Microsoft.Graph.Groups` (2.29.0+)
 - `Microsoft.Graph.Identity.SignIns` (2.29.0+)
-- `Az.Accounts` (5.1.0+) - provides WAM authentication support
+
+#### Azure PowerShell (for Azure Resources)
+- `Az.Accounts` (5.1.0+) - provides authentication and context management
+- `Az.Resources` (6.0.0+) - required for Azure Resource PIM role management
 
 **Note:** Dependencies are automatically resolved when you run `Start-PIMActivation`. If you encounter issues, try running the command with the `-Force` parameter for fully automated resolution.
 
@@ -104,6 +109,11 @@ Your account needs the following **delegated** permissions:
 - `PrivilegedAccess.ReadWrite.AzureADGroup`
 - `RoleManagementPolicy.Read.AzureADGroup`
 
+#### For Azure Resource Management
+- **Azure RBAC Reader** or higher at subscription level
+- **Privileged Role Administrator** for PIM-eligible resource role management
+- **Access to Azure subscriptions** where resource roles are assigned
+
 #### Base Permissions
 - `User.Read`
 - `Policy.Read.ConditionalAccess` (for authentication context support)
@@ -112,8 +122,14 @@ Your account needs the following **delegated** permissions:
 
 ### Basic Operations
 ```powershell
-# Launch with default settings (Entra roles and groups)
+# Launch with default settings (parallel processing enabled, Entra roles and groups)
 Start-PIMActivation
+
+# Include Azure Resource roles with parallel processing (fast!)
+Start-PIMActivation -IncludeAzureResources
+
+# Include all role types with optimized parallel execution
+Start-PIMActivation -IncludeEntraRoles -IncludeGroups -IncludeAzureResources
 
 # Use a specific app registration for delegated auth
 Start-PIMActivation -ClientId "<appId>" -TenantId "<tenantId>"
@@ -123,6 +139,28 @@ Start-PIMActivation -IncludeEntraRoles
 
 # Show only PIM-enabled security groups
 Start-PIMActivation -IncludeGroups
+
+# Show only Azure Resource roles
+Start-PIMActivation -IncludeAzureResources
+```
+
+### Performance and Parallel Processing
+```powershell
+# Default: Parallel processing with ThrottleLimit 10 (fastest)
+Start-PIMActivation -IncludeAzureResources
+
+# Increase parallel operations for very large environments
+Start-PIMActivation -IncludeAzureResources -ThrottleLimit 15
+
+# Disable parallel processing for troubleshooting or compatibility
+Start-PIMActivation -IncludeAzureResources -DisableParallelProcessing
+
+# Custom throttle with parallel processing disabled
+Start-PIMActivation -DisableParallelProcessing -ThrottleLimit 1
+
+# Enable verbose output to see parallel processing performance
+$VerbosePreference = 'Continue'
+Start-PIMActivation -IncludeAzureResources -Verbose
 ```
 
 ### Advanced Scenarios
@@ -138,6 +176,39 @@ Start-PIMActivation -IncludeGroups
 # 5. Fill out justification, and ticket info if required
 # 6. Complete any required authentication challenges
 ```
+
+## 🚀 Parallel Processing Engine
+
+### Performance Features
+The module includes a powerful parallel processing engine that dramatically improves performance:
+
+- **Default Parallel Execution**: All operations run in parallel by default (PowerShell 7+ required)
+- **Real-Time Progress Tracking**: Visual progress with emoji indicators (🚀, ✅, ❌) and timing metrics
+- **Intelligent Throttling**: Default ThrottleLimit of 10 concurrent operations, adjustable up to 50
+- **Thread-Safe Operations**: Concurrent collections ensure safe parallel execution
+- **Enhanced Verbose Output**: Detailed logging shows parallel operation progress and performance gains
+
+### Parallel Processing Control
+```powershell
+# Default: Parallel processing enabled (fastest)
+Start-PIMActivation
+
+# Increase concurrency for large environments
+Start-PIMActivation -ThrottleLimit 20
+
+# Disable parallel processing if needed
+Start-PIMActivation -DisableParallelProcessing
+
+# See parallel processing performance
+$VerbosePreference = 'Continue'
+Start-PIMActivation -Verbose
+```
+
+### Performance Impact
+- **Azure Subscriptions**: Processes multiple subscriptions concurrently
+- **Policy Retrieval**: Fetches Entra and Group policies in parallel
+- **Real-Time Feedback**: Shows progress like "Processing 5 subscriptions in parallel"
+- **Timing Metrics**: Displays completion times, e.g., "Completed in 3.2s"
 
 ## 🔧 Configuration
 
@@ -164,7 +235,15 @@ Disconnect-MgGraph
 |-----------|---------------|-------|
 | **Entra ID Directory Roles** | ✅ Full Support | Global Admin, User Admin, etc. |
 | **PIM-Enabled Security Groups** | ✅ Full Support | Groups with PIM governance enabled |
-| **Azure Resource Roles** | 🚧 Planned | Subscription and resource-level roles |
+| **Azure Resource Roles** | ✅ Full Support | Subscription, resource group, and individual resource roles |
+
+### Azure Resource Role Features
+- **Multi-Subscription Support**: Automatically enumerates roles across all accessible Azure subscriptions
+- **Scope Hierarchy**: Supports tenant root, management group, subscription, resource group, and individual resource scopes
+- **Inheritance Detection**: Distinguishes between direct assignments and inherited roles from higher scopes
+- **Silent SSO**: Seamlessly authenticates to Azure PowerShell using your existing Graph authentication context
+- **Resource Type Parsing**: Intelligently displays resource names and types (Storage Account, Virtual Machine, etc.)
+- **PIM Integration**: Full support for PIM-eligible Azure Resource role activation and deactivation
 
 ## 🛠️ Troubleshooting
 
@@ -203,10 +282,11 @@ Start-PIMActivation -Verbose
 
 ## 🗺️ Roadmap
 
-### Version 2.0.0 (Planned)
-- **Azure Resource Roles**: Support for Azure subscription and resource-level PIM roles
+### Version 2.1.0 (Planned)
 - **Profile Management**: Save and quickly activate frequently used role and account combinations
 - **Scheduling**: Plan role activations for future times
+- **Enhanced Reporting**: Built-in activation history and analytics
+- **Persistent Settings**: Save parallel processing and throttle preferences
 
 ### Wishlist features
 - **Cross-Platform**: Linux and macOS Support

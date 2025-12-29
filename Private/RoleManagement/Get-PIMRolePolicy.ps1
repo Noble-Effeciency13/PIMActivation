@@ -49,9 +49,19 @@ function Get-PIMRolePolicy {
     }
     
     # Create cache key based on role type and ID
-    $cacheKey = "$($Role.Type)_$($Role.Id)"
-    if ($Role.Type -eq 'Group') {
-        $cacheKey = "Group_$($Role.ResourceId)"
+    switch ($Role.Type) {
+        'Group'       { $cacheKey = "Group_$($Role.ResourceId)" }
+        'Entra'       { $cacheKey = "Entra_$($Role.Id)" }
+        'AzureResource' {
+            # Avoid missing properties; prefer Scope or ResourceName
+            $stableKey = $null
+            if ($Role.PSObject.Properties['Scope'] -and $Role.Scope) { $stableKey = $Role.Scope }
+            elseif ($Role.PSObject.Properties['ResourceName'] -and $Role.ResourceName) { $stableKey = $Role.ResourceName }
+            elseif ($Role.PSObject.Properties['DirectoryScopeId'] -and $Role.DirectoryScopeId) { $stableKey = $Role.DirectoryScopeId }
+            else { $stableKey = 'unknown' }
+            $cacheKey = "AzureResource_$stableKey"
+        }
+        default       { $cacheKey = "$($Role.Type)_$($Role.Id ?? 'unknown')" }
     }
     
     # Return cached result if available
@@ -64,16 +74,16 @@ function Get-PIMRolePolicy {
     
     # Initialize policy object with default values
     $policyInfo = [PSCustomObject]@{
-        MaxDuration = 8
-        RequiresMfa = $false
-        RequiresJustification = $false
-        RequiresTicket = $false
-        RequiresApproval = $false
-        RequiresAuthenticationContext = $false
-        AuthenticationContextId = $null
+        MaxDuration                      = 8
+        RequiresMfa                      = $false
+        RequiresJustification            = $false
+        RequiresTicket                   = $false
+        RequiresApproval                 = $false
+        RequiresAuthenticationContext    = $false
+        AuthenticationContextId          = $null
         AuthenticationContextDisplayName = $null
         AuthenticationContextDescription = $null
-        AuthenticationContextDetails = $null
+        AuthenticationContextDetails     = $null
     }
     
     # Initialize authentication context cache if needed
@@ -272,7 +282,8 @@ function Get-PIMRolePolicy {
         if ($policyInfo.RequiresAuthenticationContext) { 
             if ($policyInfo.AuthenticationContextDisplayName) {
                 $requirements += "AuthContext ($($policyInfo.AuthenticationContextDisplayName))"
-            } else {
+            }
+            else {
                 $requirements += "AuthContext ($($policyInfo.AuthenticationContextId))"
             }
         }

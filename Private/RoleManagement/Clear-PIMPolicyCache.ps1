@@ -31,8 +31,8 @@ function Clear-PIMPolicyCache {
     $script:AuthenticationContextCache = @{}
     
     # Clear role caches
-    $script:CachedEligibleRoles = @()
-    $script:CachedActiveRoles = @()
+    $script:CachedEligibleRoles = $null
+    $script:CachedActiveRoles = $null
     $script:LastRoleFetchTime = $null
     
     # Reset Entra policies loaded flag

@@ -116,7 +116,7 @@ function Get-MembershipType {
                 
                 try {
                     $eligibleParams = @{
-                        Filter = "principalId eq '$($Assignment.PrincipalId)' and roleDefinitionId eq '$($Assignment.RoleDefinitionId)'"
+                        Filter      = "principalId eq '$($Assignment.PrincipalId)' and roleDefinitionId eq '$($Assignment.RoleDefinitionId)'"
                         ErrorAction = 'SilentlyContinue'
                     }
                     $eligibleAssignments = Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance @eligibleParams

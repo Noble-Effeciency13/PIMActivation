@@ -53,7 +53,7 @@ function Install-RequiredModules {
     
     $result = [PSCustomObject]@{
         Success = $true
-        Error = $null
+        Error   = $null
     }
     
     try {
@@ -62,18 +62,18 @@ function Install-RequiredModules {
             Write-Verbose "Using default Microsoft Graph module set"
             $moduleList = [System.Collections.ArrayList]::new()
             $null = $moduleList.AddRange(@(
-                @{Name = 'Microsoft.Graph.Authentication'; MinVersion = '2.29.0'},
-                @{Name = 'Microsoft.Graph.Users'; MinVersion = '2.29.0'},
-                @{Name = 'Microsoft.Graph.Identity.DirectoryManagement'; MinVersion = '2.29.0'},
-                @{Name = 'Microsoft.Graph.Identity.Governance'; MinVersion = '2.29.0'},
-                @{Name = 'Microsoft.Graph.Groups'; MinVersion = '2.29.0'},
-                @{Name = 'Microsoft.Graph.Identity.SignIns'; MinVersion = '2.29.0'},
-                @{Name = 'Az.Accounts'; MinVersion = '5.1.0'}
-            ))
+                    @{Name = 'Microsoft.Graph.Authentication'; MinVersion = '2.29.0' },
+                    @{Name = 'Microsoft.Graph.Users'; MinVersion = '2.29.0' },
+                    @{Name = 'Microsoft.Graph.Identity.DirectoryManagement'; MinVersion = '2.29.0' },
+                    @{Name = 'Microsoft.Graph.Identity.Governance'; MinVersion = '2.29.0' },
+                    @{Name = 'Microsoft.Graph.Groups'; MinVersion = '2.29.0' },
+                    @{Name = 'Microsoft.Graph.Identity.SignIns'; MinVersion = '2.29.0' },
+                    @{Name = 'Az.Accounts'; MinVersion = '5.1.0' }
+                ))
             
             if ($IncludeAzureModules) {
                 Write-Verbose "Including Azure PowerShell modules"
-                $null = $moduleList.Add(@{Name = 'Az.Resources'; MinVersion = '6.0.0'})
+                $null = $moduleList.Add(@{Name = 'Az.Resources'; MinVersion = '6.0.0' })
             }
             
             $RequiredModules = $moduleList.ToArray()
@@ -171,9 +171,9 @@ function Install-RequiredModules {
             # Check for suitable installed version
             $availableModules = Get-Module -ListAvailable -Name $module.Name -ErrorAction SilentlyContinue
             $suitableModule = $availableModules | 
-                Where-Object { $_.Version -ge $module.MinVersion } | 
-                Sort-Object Version -Descending | 
-                Select-Object -First 1
+            Where-Object { $_.Version -ge $module.MinVersion } | 
+            Sort-Object Version -Descending | 
+            Select-Object -First 1
             
             if ($suitableModule) {
                 Write-Verbose "Found suitable version: $($module.Name) v$($suitableModule.Version)"
@@ -207,21 +207,21 @@ function Install-RequiredModules {
                 
                 # Install the module
                 $installParams = @{
-                    Name = $module.Name
+                    Name           = $module.Name
                     MinimumVersion = $module.MinVersion
-                    Scope = $installScope
-                    Force = $true
-                    AllowClobber = $true
-                    Repository = 'PSGallery'
-                    ErrorAction = 'Stop'
+                    Scope          = $installScope
+                    Force          = $true
+                    AllowClobber   = $true
+                    Repository     = 'PSGallery'
+                    ErrorAction    = 'Stop'
                 }
                 Install-Module @installParams
                 
                 # Import the newly installed module
                 $importParams = @{
-                    Name = $module.Name
+                    Name           = $module.Name
                     MinimumVersion = $module.MinVersion
-                    ErrorAction = 'Stop'
+                    ErrorAction    = 'Stop'
                 }
                 Import-Module @importParams
                 Write-Verbose "✓ $($module.Name) installed and imported successfully"
@@ -231,12 +231,12 @@ function Install-RequiredModules {
                 try {
                     Write-Verbose "Retrying installation with CurrentUser scope..."
                     $fallbackParams = @{
-                        Name = $module.Name
+                        Name           = $module.Name
                         MinimumVersion = $module.MinVersion
-                        Scope = 'CurrentUser'
-                        Force = $true
-                        AllowClobber = $true
-                        ErrorAction = 'Stop'
+                        Scope          = 'CurrentUser'
+                        Force          = $true
+                        AllowClobber   = $true
+                        ErrorAction    = 'Stop'
                     }
                     Install-Module @fallbackParams
                     

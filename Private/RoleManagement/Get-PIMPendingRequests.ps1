@@ -52,16 +52,16 @@ function Get-PIMPendingRequests {
                     $roleDefinition = Get-MgRoleManagementDirectoryRoleDefinition -UnifiedRoleDefinitionId $request.RoleDefinitionId -ErrorAction SilentlyContinue
                     
                     $pendingRequest = [PSCustomObject]@{
-                        Type = 'Entra'
+                        Type             = 'Entra'
                         RoleDefinitionId = $request.RoleDefinitionId
-                        RoleName = if ($roleDefinition) { $roleDefinition.DisplayName } else { "Unknown Role" }
-                        RequestId = $request.Id
-                        Action = $request.Action
-                        Status = $request.Status
-                        CreatedDateTime = $request.CreatedDateTime
+                        RoleName         = if ($roleDefinition) { $roleDefinition.DisplayName } else { "Unknown Role" }
+                        RequestId        = $request.Id
+                        Action           = $request.Action
+                        Status           = $request.Status
+                        CreatedDateTime  = $request.CreatedDateTime
                         DirectoryScopeId = $request.DirectoryScopeId
-                        Justification = $request.Justification
-                        ScheduleInfo = $request.ScheduleInfo
+                        Justification    = $request.Justification
+                        ScheduleInfo     = $request.ScheduleInfo
                     }
                     
                     $null = $pendingRequests.Add($pendingRequest)
@@ -71,16 +71,16 @@ function Get-PIMPendingRequests {
                     Write-Warning "Failed to get role definition for ID $($request.RoleDefinitionId): $_"
                     # Add the request even without role definition
                     $pendingRequest = [PSCustomObject]@{
-                        Type = 'Entra'
+                        Type             = 'Entra'
                         RoleDefinitionId = $request.RoleDefinitionId
-                        RoleName = "Unknown Role"
-                        RequestId = $request.Id
-                        Action = $request.Action
-                        Status = $request.Status
-                        CreatedDateTime = $request.CreatedDateTime
+                        RoleName         = "Unknown Role"
+                        RequestId        = $request.Id
+                        Action           = $request.Action
+                        Status           = $request.Status
+                        CreatedDateTime  = $request.CreatedDateTime
                         DirectoryScopeId = $request.DirectoryScopeId
-                        Justification = $request.Justification
-                        ScheduleInfo = $request.ScheduleInfo
+                        Justification    = $request.Justification
+                        ScheduleInfo     = $request.ScheduleInfo
                     }
                     $null = $pendingRequests.Add($pendingRequest)
                     Write-Verbose "Added pending Entra request with unknown role name: $($pendingRequest.RoleDefinitionId)"
@@ -99,16 +99,16 @@ function Get-PIMPendingRequests {
             foreach ($request in $groupRequests) {
                 if ($request.Group) {
                     $groupRequest = [PSCustomObject]@{
-                        Type = 'Group'
-                        GroupId = $request.GroupId
-                        RoleName = $request.Group.DisplayName
-                        RequestId = $request.Id
-                        Action = $request.Action
-                        Status = $request.Status
+                        Type            = 'Group'
+                        GroupId         = $request.GroupId
+                        RoleName        = $request.Group.DisplayName
+                        RequestId       = $request.Id
+                        Action          = $request.Action
+                        Status          = $request.Status
                         CreatedDateTime = $request.CreatedDateTime
-                        AccessId = $request.AccessId
-                        Justification = $request.Justification
-                        ScheduleInfo = $request.ScheduleInfo
+                        AccessId        = $request.AccessId
+                        Justification   = $request.Justification
+                        ScheduleInfo    = $request.ScheduleInfo
                     }
                     $null = $pendingRequests.Add($groupRequest)
                     Write-Verbose "Added pending Group request: $($groupRequest.RoleName) (ID: $($groupRequest.GroupId))"

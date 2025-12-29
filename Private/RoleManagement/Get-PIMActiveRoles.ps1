@@ -50,9 +50,9 @@ function Get-PIMActiveRoles {
     
     # Prepare parameters for role query
     $roleParams = @{
-        UserId = $script:CurrentUser.Id
-        IncludeEntraRoles = $script:IncludeEntraRoles
-        IncludeGroups = $script:IncludeGroups
+        UserId                = $script:CurrentUser.Id
+        IncludeEntraRoles     = $script:IncludeEntraRoles
+        IncludeGroups         = $script:IncludeGroups
         IncludeAzureResources = $script:IncludeAzureResources
     }
     
@@ -77,7 +77,8 @@ function Get-PIMActiveRoles {
             # Determine assignment type
             $memberType = if ($role.MemberType) { 
                 $role.MemberType 
-            } else {
+            }
+            else {
                 Get-MembershipType -Assignment $role.Assignment -RoleType $role.Type
             }
             
@@ -92,17 +93,17 @@ function Get-PIMActiveRoles {
             
             # Create formatted role object
             $formattedRole = [PSCustomObject]@{
-                Type = $role.Type
-                DisplayName = $role.Name
-                EndDateTime = $role.EndDateTime
-                ResourceName = $role.ResourceName
+                Type             = $role.Type
+                DisplayName      = $role.Name
+                EndDateTime      = $role.EndDateTime
+                ResourceName     = $role.ResourceName
                 DirectoryScopeId = $role.DirectoryScopeId
-                Assignment = $role.Assignment
-                ResourceId = $role.ResourceId
-                GroupId = ($role.Type -eq 'Group') ? $role.ResourceId : $null
-                Scope = $scopeDisplay
-                MemberType = $memberType
-                ScheduleId = $scheduleId
+                Assignment       = $role.Assignment
+                ResourceId       = $role.ResourceId
+                GroupId          = ($role.Type -eq 'Group') ? $role.ResourceId : $null
+                Scope            = $scopeDisplay
+                MemberType       = $memberType
+                ScheduleId       = $scheduleId
                 RoleDefinitionId = $role.Id
             }
             
@@ -123,31 +124,4 @@ function Get-PIMActiveRoles {
         Write-Verbose "Exception details: $($_.Exception.GetType().Name) - $($_.ScriptStackTrace)"
         return @()
     }
-}
-
-# Helper function to format scope display
-function Get-FormattedScope {
-    param(
-        [string]$DirectoryScopeId,
-        [string]$RoleType
-    )
-    
-    if (-not $DirectoryScopeId -or $DirectoryScopeId -eq "/" -or $DirectoryScopeId -eq "Directory") {
-        return "Directory"
-    }
-    
-    # Handle Administrative Unit scopes
-    if ($DirectoryScopeId -match "^/administrativeUnits/(.+)$") {
-        $auId = $Matches[1]
-        try {
-            $au = Get-MgDirectoryAdministrativeUnit -AdministrativeUnitId $auId -ErrorAction Stop
-            return "AU: $($au.DisplayName)"
-        }
-        catch {
-            Write-Verbose "Unable to resolve Administrative Unit name for ID: $auId"
-            return "AU: $auId"
-        }
-    }
-    
-    return $DirectoryScopeId
 }

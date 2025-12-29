@@ -19,9 +19,21 @@ function Get-PIMPoliciesBatch {
     .PARAMETER PolicyCache
         Hashtable to store the fetched policies in.
     
+    .PARAMETER EnableParallelProcessing
+        Switch to enable parallel processing of policy fetching.
+        Requires PowerShell 7+ and significantly improves performance with multiple policies.
+    
+    .PARAMETER ThrottleLimit
+        Maximum number of parallel operations for policy fetching.
+        Default is 6. Only used when EnableParallelProcessing is specified.
+    
     .EXAMPLE
         Get-PIMPoliciesBatch -RoleIds $roleIds -Type 'Entra' -PolicyCache $cache
         Fetches policies for the specified Entra roles and stores them in the cache.
+    
+    .EXAMPLE
+        Get-PIMPoliciesBatch -RoleIds $roleIds -Type 'Entra' -PolicyCache $cache -ThrottleLimit 8
+        Fetches policies using parallel processing with 8 concurrent operations.
     
     .NOTES
         This function uses batch operations to significantly reduce the number of API calls
@@ -34,7 +46,11 @@ function Get-PIMPoliciesBatch {
         [ValidateSet('Entra', 'Group')]
         [string]$Type,
         [Parameter(Mandatory)]
-        [hashtable]$PolicyCache
+        [hashtable]$PolicyCache,
+        
+        [switch]$DisableParallelProcessing,
+        
+        [int]$ThrottleLimit = 10
     )
     
     Write-Verbose "Starting batch policy fetch for $Type roles"
@@ -150,27 +166,150 @@ function Get-PIMPoliciesBatch {
                     }
                     Write-Verbose "Processing $($uniquePolicyIds.Count) unique policies"
 
-                    # Batch fetch all policies with expanded rules
-                    foreach ($policyId in $uniquePolicyIds) {
-                        try {
-                            $policy = Get-MgPolicyRoleManagementPolicy -UnifiedRoleManagementPolicyId $policyId -ExpandProperty "rules"
-
-                            # Process policy rules
-                            $policyInfo = ConvertTo-PolicyInfo -Policy $policy
-
-                            # Map policy to all roles that use it
-                            $applicableRoles = $policyAssignments | Where-Object { $_.PolicyId -eq $policyId }
-                            foreach ($assignment in $applicableRoles) {
+                    # Check if parallel processing is requested and supported
+                    $useParallel = -not $DisableParallelProcessing -and $PSVersionTable.PSVersion.Major -ge 7 -and $uniquePolicyIds.Count -gt 2
+                    
+                    if ($useParallel) {
+                        Write-Verbose "Using parallel processing for $($uniquePolicyIds.Count) Entra policies (ThrottleLimit: $ThrottleLimit)"
+                        
+                        # Create thread-safe collection for results
+                        $policyResults = [System.Collections.Concurrent.ConcurrentDictionary[string,object]]::new()
+                        $processedCount = [System.Collections.Concurrent.ConcurrentDictionary[string,bool]]::new()
+                        $startTime = Get-Date
+                        
+                        # Process policies in parallel
+                        $uniquePolicyIds | ForEach-Object -Parallel {
+                            $policyId = $_
+                            $policyResultsLocal = $using:policyResults
+                            $processedCountLocal = $using:processedCount
+                            
+                            # Import the ConvertTo-PolicyInfo function definition into parallel scope
+                            function ConvertTo-PolicyInfo {
+                                param([Parameter(Mandatory)]$Policy)
+                                
+                                $policyInfo = [PSCustomObject]@{
+                                    MaxDuration = 8
+                                    RequiresMfa = $false
+                                    RequiresJustification = $false
+                                    RequiresTicket = $false
+                                    RequiresApproval = $false
+                                    RequiresAuthenticationContext = $false
+                                    AuthenticationContextId = $null
+                                    AuthenticationContextDisplayName = $null
+                                    AuthenticationContextDescription = $null
+                                    AuthenticationContextDetails = $null
+                                }
+                                
+                                if (-not $Policy.Rules) {
+                                    return $policyInfo
+                                }
+                                
+                                foreach ($rule in $Policy.Rules) {
+                                    $ruleType = $rule.AdditionalProperties['@odata.type'] ?? $rule.'@odata.type'
+                                    
+                                    switch ($ruleType) {
+                                        '#microsoft.graph.unifiedRoleManagementPolicyExpirationRule' {
+                                            if ($rule.AdditionalProperties.maximumDuration -or $rule.maximumDuration) {
+                                                $duration = $rule.AdditionalProperties.maximumDuration ?? $rule.maximumDuration
+                                                try {
+                                                    $timespan = [System.Xml.XmlConvert]::ToTimeSpan($duration)
+                                                    $policyInfo.MaxDuration = [int]$timespan.TotalHours
+                                                }
+                                                catch {
+                                                    # Keep default
+                                                }
+                                            }
+                                        }
+                                        '#microsoft.graph.unifiedRoleManagementPolicyEnablementRule' {
+                                            $enabledRules = @($rule.AdditionalProperties.enabledRules ?? $rule.enabledRules ?? @())
+                                            $policyInfo.RequiresJustification = 'Justification' -in $enabledRules
+                                            $policyInfo.RequiresTicket = 'Ticketing' -in $enabledRules
+                                            $policyInfo.RequiresMfa = 'MultiFactorAuthentication' -in $enabledRules
+                                            $policyInfo.RequiresAuthenticationContext = 'AuthenticationContext' -in $enabledRules
+                                        }
+                                        '#microsoft.graph.unifiedRoleManagementPolicyApprovalRule' {
+                                            $setting = $rule.AdditionalProperties.setting ?? $rule.setting
+                                            if ($setting -and $setting.isApprovalRequired) {
+                                                $policyInfo.RequiresApproval = $true
+                                            }
+                                        }
+                                        '#microsoft.graph.unifiedRoleManagementPolicyAuthenticationContextRule' {
+                                            if (($rule.AdditionalProperties.isEnabled ?? $rule.isEnabled) -and 
+                                                ($rule.AdditionalProperties.claimValue ?? $rule.claimValue)) {
+                                                $policyInfo.RequiresAuthenticationContext = $true
+                                                $policyInfo.AuthenticationContextId = $rule.AdditionalProperties.claimValue ?? $rule.claimValue
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                return $policyInfo
+                            }
+                            
+                            try {
+                                Write-Verbose "[Parallel] Fetching policy: $policyId"
+                                $policy = Get-MgPolicyRoleManagementPolicy -UnifiedRoleManagementPolicyId $policyId -ExpandProperty "rules" -ErrorAction Stop
+                                
+                                # Convert policy to policy info using the function now available in this runspace
+                                $policyInfo = ConvertTo-PolicyInfo -Policy $policy
+                                
+                                $policyResultsLocal.TryAdd($policyId, $policyInfo) | Out-Null
+                                $processedCountLocal.TryAdd($policyId, $true) | Out-Null
+                                
+                                $currentProgress = $processedCountLocal.Count
+                                $totalPolicies = $using:uniquePolicyIds.Count
+                                Write-Verbose "[Parallel] ✅ Policy $policyId completed ($currentProgress/$totalPolicies)"
+                            }
+                            catch {
+                                Write-Verbose "[Parallel] ❌ Failed to fetch policy $policyId : $_"
+                            }
+                        } -ThrottleLimit $ThrottleLimit
+                        
+                        $endTime = Get-Date
+                        $duration = ($endTime - $startTime).TotalSeconds
+                        Write-Verbose "Parallel Entra policy processing completed in $([Math]::Round($duration, 1))s. Successfully fetched $($policyResults.Count)/$($uniquePolicyIds.Count) policies"
+                        
+                        # Apply results to cache
+                        foreach ($assignment in $policyAssignments) {
+                            if ($policyResults.ContainsKey($assignment.PolicyId)) {
+                                $policyInfo = $policyResults[$assignment.PolicyId]
                                 $cacheKey = "Entra_$($assignment.RoleDefinitionId)"
                                 $PolicyCache[$cacheKey] = $policyInfo
-                                # Also cache in script-level cache for future use
                                 $script:PolicyCache[$cacheKey] = $policyInfo
                                 Write-Verbose "Cached policy for Entra role: $($assignment.RoleDefinitionId)"
                             }
                         }
-                        catch {
-                            Write-Warning "Failed to fetch policy $policyId : $_"
-                            continue
+                    }
+                    else {
+                        # Use sequential processing (original logic)
+                        if ($DisableParallelProcessing) {
+                            Write-Verbose "Parallel processing disabled by user. Using sequential processing."
+                        } else {
+                            Write-Verbose "Parallel processing not supported (PowerShell $($PSVersionTable.PSVersion.Major) or few policies). Using sequential processing."
+                        }
+                        
+                        # Batch fetch all policies with expanded rules
+                        foreach ($policyId in $uniquePolicyIds) {
+                            try {
+                                $policy = Get-MgPolicyRoleManagementPolicy -UnifiedRoleManagementPolicyId $policyId -ExpandProperty "rules"
+
+                                # Process policy rules
+                                $policyInfo = ConvertTo-PolicyInfo -Policy $policy
+
+                                # Map policy to all roles that use it
+                                $applicableRoles = $policyAssignments | Where-Object { $_.PolicyId -eq $policyId }
+                                foreach ($assignment in $applicableRoles) {
+                                    $cacheKey = "Entra_$($assignment.RoleDefinitionId)"
+                                    $PolicyCache[$cacheKey] = $policyInfo
+                                    # Also cache in script-level cache for future use
+                                    $script:PolicyCache[$cacheKey] = $policyInfo
+                                    Write-Verbose "Cached policy for Entra role: $($assignment.RoleDefinitionId)"
+                                }
+                            }
+                            catch {
+                                Write-Warning "Failed to fetch policy $policyId : $_"
+                                continue
+                            }
                         }
                     }
                 }
@@ -302,17 +441,134 @@ function Get-PIMPoliciesBatch {
                     if (-not $uniquePolicyIds) { $uniquePolicyIds = @() } elseif ($uniquePolicyIds -isnot [array]) { $uniquePolicyIds = @($uniquePolicyIds) }
                     Write-Verbose "Processing $($uniquePolicyIds.Count) unique group policies"
 
-                    # Fetch all referenced policies once
-                    $policyMap = @{}
-                    foreach ($policyId in $uniquePolicyIds) {
-                        try {
-                            $policyParams = @{ UnifiedRoleManagementPolicyId = $policyId; ExpandProperty = 'rules' }
-                            $policy = Get-MgPolicyRoleManagementPolicy @policyParams
-                            $policyMap[$policyId] = ConvertTo-PolicyInfo -Policy $policy
+                    # Check if parallel processing is requested and supported
+                    $useParallelGroups = -not $DisableParallelProcessing -and $PSVersionTable.PSVersion.Major -ge 7 -and $uniquePolicyIds.Count -gt 2
+                    
+                    if ($useParallelGroups) {
+                        Write-Verbose "Using parallel processing for $($uniquePolicyIds.Count) Group policies (ThrottleLimit: $ThrottleLimit)"
+                        
+                        # Create thread-safe collection for results
+                        $policyMapParallel = [System.Collections.Concurrent.ConcurrentDictionary[string,object]]::new()
+                        $processedCountGroups = [System.Collections.Concurrent.ConcurrentDictionary[string,bool]]::new()
+                        $startTimeGroups = Get-Date
+                        
+                        # Process group policies in parallel
+                        $uniquePolicyIds | ForEach-Object -Parallel {
+                            $policyId = $_
+                            $policyMapParallelLocal = $using:policyMapParallel
+                            $processedCountGroupsLocal = $using:processedCountGroups
+                            
+                            # Import the ConvertTo-PolicyInfo function definition into parallel scope
+                            function ConvertTo-PolicyInfo {
+                                param([Parameter(Mandatory)]$Policy)
+                                
+                                $policyInfo = [PSCustomObject]@{
+                                    MaxDuration = 8
+                                    RequiresMfa = $false
+                                    RequiresJustification = $false
+                                    RequiresTicket = $false
+                                    RequiresApproval = $false
+                                    RequiresAuthenticationContext = $false
+                                    AuthenticationContextId = $null
+                                    AuthenticationContextDisplayName = $null
+                                    AuthenticationContextDescription = $null
+                                    AuthenticationContextDetails = $null
+                                }
+                                
+                                if (-not $Policy.Rules) {
+                                    return $policyInfo
+                                }
+                                
+                                foreach ($rule in $Policy.Rules) {
+                                    $ruleType = $rule.AdditionalProperties['@odata.type'] ?? $rule.'@odata.type'
+                                    
+                                    switch ($ruleType) {
+                                        '#microsoft.graph.unifiedRoleManagementPolicyExpirationRule' {
+                                            if ($rule.AdditionalProperties.maximumDuration -or $rule.maximumDuration) {
+                                                $duration = $rule.AdditionalProperties.maximumDuration ?? $rule.maximumDuration
+                                                try {
+                                                    $timespan = [System.Xml.XmlConvert]::ToTimeSpan($duration)
+                                                    $policyInfo.MaxDuration = [int]$timespan.TotalHours
+                                                }
+                                                catch {
+                                                    # Keep default
+                                                }
+                                            }
+                                        }
+                                        '#microsoft.graph.unifiedRoleManagementPolicyEnablementRule' {
+                                            $enabledRules = @($rule.AdditionalProperties.enabledRules ?? $rule.enabledRules ?? @())
+                                            $policyInfo.RequiresJustification = 'Justification' -in $enabledRules
+                                            $policyInfo.RequiresTicket = 'Ticketing' -in $enabledRules
+                                            $policyInfo.RequiresMfa = 'MultiFactorAuthentication' -in $enabledRules
+                                            $policyInfo.RequiresAuthenticationContext = 'AuthenticationContext' -in $enabledRules
+                                        }
+                                        '#microsoft.graph.unifiedRoleManagementPolicyApprovalRule' {
+                                            $setting = $rule.AdditionalProperties.setting ?? $rule.setting
+                                            if ($setting -and $setting.isApprovalRequired) {
+                                                $policyInfo.RequiresApproval = $true
+                                            }
+                                        }
+                                        '#microsoft.graph.unifiedRoleManagementPolicyAuthenticationContextRule' {
+                                            if (($rule.AdditionalProperties.isEnabled ?? $rule.isEnabled) -and 
+                                                ($rule.AdditionalProperties.claimValue ?? $rule.claimValue)) {
+                                                $policyInfo.RequiresAuthenticationContext = $true
+                                                $policyInfo.AuthenticationContextId = $rule.AdditionalProperties.claimValue ?? $rule.claimValue
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                return $policyInfo
+                            }
+                            
+                            try {
+                                Write-Verbose "[Parallel] Fetching group policy: $policyId"
+                                $policyParams = @{ UnifiedRoleManagementPolicyId = $policyId; ExpandProperty = 'rules' }
+                                $policy = Get-MgPolicyRoleManagementPolicy @policyParams -ErrorAction Stop
+                                $policyInfo = ConvertTo-PolicyInfo -Policy $policy
+                                
+                                $policyMapParallelLocal.TryAdd($policyId, $policyInfo) | Out-Null
+                                $processedCountGroupsLocal.TryAdd($policyId, $true) | Out-Null
+                                
+                                $currentProgress = $processedCountGroupsLocal.Count
+                                $totalPolicies = $using:uniquePolicyIds.Count
+                                Write-Verbose "[Parallel] ✅ Group policy $policyId completed ($currentProgress/$totalPolicies)"
+                            }
+                            catch {
+                                Write-Verbose "[Parallel] ❌ Failed to fetch group policy $policyId : $_"
+                            }
+                        } -ThrottleLimit $ThrottleLimit
+                        
+                        $endTimeGroups = Get-Date
+                        $durationGroups = ($endTimeGroups - $startTimeGroups).TotalSeconds
+                        Write-Verbose "Parallel Group policy processing completed in $([Math]::Round($durationGroups, 1))s. Successfully fetched $($policyMapParallel.Count)/$($uniquePolicyIds.Count) policies"
+                        
+                        # Convert concurrent dictionary to regular hashtable
+                        $policyMap = @{}
+                        foreach ($key in $policyMapParallel.Keys) {
+                            $policyMap[$key] = $policyMapParallel[$key]
                         }
-                        catch {
-                            Write-Warning "Failed to fetch group policy $policyId : $_"
-                            continue
+                    }
+                    else {
+                        # Use sequential processing (original logic)
+                        if ($DisableParallelProcessing) {
+                            Write-Verbose "Parallel processing disabled by user. Using sequential processing."
+                        } else {
+                            Write-Verbose "Parallel processing not supported (PowerShell $($PSVersionTable.PSVersion.Major) or few policies). Using sequential processing."
+                        }
+                        
+                        # Fetch all referenced policies once
+                        $policyMap = @{}
+                        foreach ($policyId in $uniquePolicyIds) {
+                            try {
+                                $policyParams = @{ UnifiedRoleManagementPolicyId = $policyId; ExpandProperty = 'rules' }
+                                $policy = Get-MgPolicyRoleManagementPolicy @policyParams
+                                $policyMap[$policyId] = ConvertTo-PolicyInfo -Policy $policy
+                            }
+                            catch {
+                                Write-Warning "Failed to fetch group policy $policyId : $_"
+                                continue
+                            }
                         }
                     }
 
@@ -346,145 +602,4 @@ function Get-PIMPoliciesBatch {
         Write-Warning "Failed to batch fetch policies: $_"
         throw
     }
-}
-
-function ConvertTo-PolicyInfo {
-    <#
-    .SYNOPSIS
-        Converts a Graph API policy object to a standardized policy info object.
-    
-    .PARAMETER Policy
-        The policy object returned from the Graph API.
-    
-    .OUTPUTS
-        PSCustomObject with standardized policy information.
-    #>
-    param(
-        [Parameter(Mandatory)]
-        $Policy
-    )
-    
-    $policyInfo = [PSCustomObject]@{
-        MaxDuration = 8
-        RequiresMfa = $false
-        RequiresJustification = $false
-        RequiresTicket = $false
-        RequiresApproval = $false
-        RequiresAuthenticationContext = $false
-        AuthenticationContextId = $null
-        AuthenticationContextDisplayName = $null
-        AuthenticationContextDescription = $null
-        AuthenticationContextDetails = $null
-    }
-    
-    if (-not $Policy.Rules) {
-        Write-Verbose "Policy has no rules, returning defaults"
-        return $policyInfo
-    }
-    
-    foreach ($rule in $Policy.Rules) {
-        $ruleType = $rule.AdditionalProperties['@odata.type'] ?? $rule.'@odata.type'
-        
-        switch ($ruleType) {
-            '#microsoft.graph.unifiedRoleManagementPolicyExpirationRule' {
-                if ($rule.AdditionalProperties.maximumDuration -or $rule.maximumDuration) {
-                    $duration = $rule.AdditionalProperties.maximumDuration ?? $rule.maximumDuration
-                    try {
-                        $timespan = [System.Xml.XmlConvert]::ToTimeSpan($duration)
-                        $policyInfo.MaxDuration = [int]$timespan.TotalHours
-                        Write-Verbose "Set max duration to $($policyInfo.MaxDuration) hours"
-                    }
-                    catch {
-                        Write-Verbose "Could not parse duration: $duration"
-                    }
-                }
-            }
-            '#microsoft.graph.unifiedRoleManagementPolicyEnablementRule' {
-                $enabledRules = @($rule.AdditionalProperties.enabledRules ?? $rule.enabledRules ?? @())
-                $policyInfo.RequiresJustification = 'Justification' -in $enabledRules
-                $policyInfo.RequiresTicket = 'Ticketing' -in $enabledRules
-                $policyInfo.RequiresMfa = 'MultiFactorAuthentication' -in $enabledRules
-                $policyInfo.RequiresAuthenticationContext = 'AuthenticationContext' -in $enabledRules
-                Write-Verbose "Enablement rules: MFA=$($policyInfo.RequiresMfa), Justification=$($policyInfo.RequiresJustification), Ticket=$($policyInfo.RequiresTicket), AuthContext=$($policyInfo.RequiresAuthenticationContext)"
-            }
-            '#microsoft.graph.unifiedRoleManagementPolicyApprovalRule' {
-                $setting = $rule.AdditionalProperties.setting ?? $rule.setting
-                if ($setting -and $setting.isApprovalRequired) {
-                    $policyInfo.RequiresApproval = $true
-                    Write-Verbose "Approval required: true"
-                }
-            }
-            '#microsoft.graph.unifiedRoleManagementPolicyAuthenticationContextRule' {
-                if (($rule.AdditionalProperties.isEnabled ?? $rule.isEnabled) -and 
-                    ($rule.AdditionalProperties.claimValue ?? $rule.claimValue)) {
-                    $policyInfo.RequiresAuthenticationContext = $true
-                    $policyInfo.AuthenticationContextId = $rule.AdditionalProperties.claimValue ?? $rule.claimValue
-                    Write-Verbose "Authentication context required: $($policyInfo.AuthenticationContextId)"
-                }
-            }
-        }
-    }
-    
-    return $policyInfo
-}
-
-function Get-AuthenticationContextsBatch {
-    <#
-    .SYNOPSIS
-        Retrieves authentication contexts in batch for better performance.
-    
-    .PARAMETER ContextIds
-        Array of authentication context IDs to fetch.
-    
-    .PARAMETER ContextCache
-        Hashtable to store the fetched contexts in.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string[]]$ContextIds,
-        
-        [Parameter(Mandatory)]
-        [hashtable]$ContextCache
-    )
-    
-    # Ensure we have arrays to work with for input parameters
-    if (-not $ContextIds) {
-        $ContextIds = @()
-    } elseif ($ContextIds -isnot [array]) {
-        $ContextIds = @($ContextIds)
-    }
-    
-    Write-Verbose "Batch fetching $($ContextIds.Count) authentication contexts"
-    
-    foreach ($contextId in $ContextIds) {
-        try {
-            # Skip if already cached locally
-            if ($ContextCache.ContainsKey($contextId)) {
-                continue
-            }
-            
-            # Check script-level cache first
-            if ($script:AuthenticationContextCache.ContainsKey($contextId)) {
-                Write-Verbose "Using cached authentication context: $contextId"
-                $ContextCache[$contextId] = $script:AuthenticationContextCache[$contextId]
-                continue
-            }
-            
-            # Fetch from Graph API if not in any cache
-            $context = Get-MgIdentityConditionalAccessAuthenticationContextClassReference -AuthenticationContextClassReferenceId $contextId
-            if ($context) {
-                $ContextCache[$contextId] = $context
-                # Also cache in script-level cache for future use
-                $script:AuthenticationContextCache[$contextId] = $context
-                Write-Verbose "Cached authentication context: $contextId - $($context.DisplayName)"
-            }
-        }
-        catch {
-            Write-Warning "Failed to fetch authentication context $contextId : $_"
-            continue
-        }
-    }
-    
-    Write-Verbose "Completed batch authentication context fetch"
 }

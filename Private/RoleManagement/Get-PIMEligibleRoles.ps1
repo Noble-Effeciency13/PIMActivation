@@ -47,9 +47,9 @@ function Get-PIMEligibleRoles {
     
     # Prepare parameters for role retrieval
     $params = @{
-        UserId = $script:CurrentUser.Id
-        IncludeEntraRoles = $script:IncludeEntraRoles
-        IncludeGroups = $script:IncludeGroups
+        UserId                = $script:CurrentUser.Id
+        IncludeEntraRoles     = $script:IncludeEntraRoles
+        IncludeGroups         = $script:IncludeGroups
         IncludeAzureResources = $false  # Explicitly disabled for this version
     }
     
@@ -89,20 +89,21 @@ function Get-PIMEligibleRoles {
             
             # Create base formatted role object
             $formattedRole = [PSCustomObject]@{
-                Type = $role.Type
-                DisplayName = $role.Name
-                PolicyInfo = $policyInfo
+                Type         = $role.Type
+                DisplayName  = $role.Name
+                PolicyInfo   = $policyInfo
                 ResourceName = $role.ResourceName
-                Assignment = $role.Assignment
-                Scope = $scopeDisplay
-                MemberType = $role.MemberType  # This line ensures MemberType is passed through
+                Assignment   = $role.Assignment
+                Scope        = $scopeDisplay
+                MemberType   = $role.MemberType  # This line ensures MemberType is passed through
             }
             
             # Add the appropriate ID property based on role type
             if ($role.Type -eq 'Group') {
                 $formattedRole | Add-Member -NotePropertyName 'GroupId' -NotePropertyValue $role.ResourceId
                 $formattedRole | Add-Member -NotePropertyName 'RoleDefinitionId' -NotePropertyValue $null
-            } else {
+            }
+            else {
                 # Entra roles and others use RoleDefinitionId
                 $formattedRole | Add-Member -NotePropertyName 'RoleDefinitionId' -NotePropertyValue $role.Id
                 $formattedRole | Add-Member -NotePropertyName 'GroupId' -NotePropertyValue $null
@@ -129,52 +130,5 @@ function Get-PIMEligibleRoles {
         Write-Error "Failed to retrieve eligible roles: $($_.Exception.Message)"
         Write-Verbose "Exception details: $($_.Exception.GetType().Name) - $($_.ScriptStackTrace)"
         return @()
-    }
-}
-
-# Helper function to format scope display
-function Get-FormattedScopeDisplay {
-    param($Role)
-    
-    $scopeDisplay = "Directory"
-    
-    if ($Role.DirectoryScopeId -and $Role.DirectoryScopeId -ne "/" -and $Role.DirectoryScopeId -ne "Directory") {
-        if ($Role.DirectoryScopeId -match "^/administrativeUnits/(.+)$") {
-            $auId = $Matches[1]
-            try {
-                $au = Get-MgDirectoryAdministrativeUnit -AdministrativeUnitId $auId -ErrorAction Stop
-                $scopeDisplay = "AU: $($au.DisplayName)"
-            }
-            catch {
-                Write-Verbose "Could not retrieve Administrative Unit name for ID: $auId"
-                $scopeDisplay = "AU: $auId"
-            }
-        }
-        else {
-            $scopeDisplay = $Role.DirectoryScopeId
-        }
-    }
-    
-    return $scopeDisplay
-}
-
-# Helper function to add type-specific properties
-function Add-TypeSpecificProperties {
-    param($FormattedRole, $SourceRole)
-    
-    switch ($SourceRole.Type) {
-        'Entra' {
-            $FormattedRole | Add-Member -NotePropertyName 'DirectoryScopeId' -NotePropertyValue $SourceRole.DirectoryScopeId
-            $FormattedRole | Add-Member -NotePropertyName 'SubscriptionId' -NotePropertyValue $null
-        }
-        'Group' {
-            $FormattedRole | Add-Member -NotePropertyName 'DirectoryScopeId' -NotePropertyValue $null
-            $FormattedRole | Add-Member -NotePropertyName 'SubscriptionId' -NotePropertyValue $null
-        }
-        default {
-            # Future Azure resource roles
-            $FormattedRole | Add-Member -NotePropertyName 'DirectoryScopeId' -NotePropertyValue $null
-            $FormattedRole | Add-Member -NotePropertyName 'SubscriptionId' -NotePropertyValue $null
-        }
     }
 }

@@ -54,9 +54,9 @@ function Get-GroupRoles {
             $eligibleGroups = $null
             try {
                 $eligibleParams = @{
-                    Filter = "principalId eq '$UserId'"
+                    Filter         = "principalId eq '$UserId'"
                     ExpandProperty = 'group'
-                    ErrorAction = 'Stop'
+                    ErrorAction    = 'Stop'
                 }
                 $eligibleGroups = Get-MgIdentityGovernancePrivilegedAccessGroupEligibilityScheduleInstance @eligibleParams
             }
@@ -75,20 +75,20 @@ function Get-GroupRoles {
                     Write-Verbose "Processing eligible group: $($membership.Group.DisplayName) (Access: $($membership.AccessId))"
                     
                     $null = $roles.Add([PSCustomObject]@{
-                        Id = $membership.GroupId
-                        Name = $membership.Group.DisplayName
-                        Type = 'Group'
-                        Status = 'Eligible'
-                        Source = 'PIMGroup'
-                        ResourceId = $membership.GroupId
-                        ResourceName = $membership.Group.DisplayName
-                        StartDateTime = $membership.StartDateTime
-                        EndDateTime = $membership.EndDateTime
-                        MemberType = $membership.AccessId
-                        DirectoryScopeId = $null
-                        PrincipalId = $membership.PrincipalId
-                        Assignment = $membership
-                    })
+                            Id               = $membership.GroupId
+                            Name             = $membership.Group.DisplayName
+                            Type             = 'Group'
+                            Status           = 'Eligible'
+                            Source           = 'PIMGroup'
+                            ResourceId       = $membership.GroupId
+                            ResourceName     = $membership.Group.DisplayName
+                            StartDateTime    = $membership.StartDateTime
+                            EndDateTime      = $membership.EndDateTime
+                            MemberType       = $membership.AccessId
+                            DirectoryScopeId = $null
+                            PrincipalId      = $membership.PrincipalId
+                            Assignment       = $membership
+                        })
                 }
             }
             
@@ -97,9 +97,9 @@ function Get-GroupRoles {
             $activeGroups = $null
             try {
                 $activeParams = @{
-                    Filter = "principalId eq '$UserId'"
+                    Filter         = "principalId eq '$UserId'"
                     ExpandProperty = 'group'
-                    ErrorAction = 'Stop'
+                    ErrorAction    = 'Stop'
                 }
                 $activeGroups = Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleInstance @activeParams
             }
@@ -118,20 +118,20 @@ function Get-GroupRoles {
                     Write-Verbose "Processing active group: $($membership.Group.DisplayName) (Access: $($membership.AccessId))"
                     
                     $null = $roles.Add([PSCustomObject]@{
-                        Id = $membership.GroupId
-                        Name = $membership.Group.DisplayName
-                        Type = 'Group'
-                        Status = 'Active'
-                        Source = 'PIMGroup'
-                        ResourceId = $membership.GroupId
-                        ResourceName = $membership.Group.DisplayName
-                        StartDateTime = $membership.StartDateTime
-                        EndDateTime = $membership.EndDateTime
-                        MemberType = $membership.AccessId
-                        DirectoryScopeId = $null
-                        PrincipalId = $membership.PrincipalId
-                        Assignment = $membership
-                    })
+                            Id               = $membership.GroupId
+                            Name             = $membership.Group.DisplayName
+                            Type             = 'Group'
+                            Status           = 'Active'
+                            Source           = 'PIMGroup'
+                            ResourceId       = $membership.GroupId
+                            ResourceName     = $membership.Group.DisplayName
+                            StartDateTime    = $membership.StartDateTime
+                            EndDateTime      = $membership.EndDateTime
+                            MemberType       = $membership.AccessId
+                            DirectoryScopeId = $null
+                            PrincipalId      = $membership.PrincipalId
+                            Assignment       = $membership
+                        })
                 }
             }
             

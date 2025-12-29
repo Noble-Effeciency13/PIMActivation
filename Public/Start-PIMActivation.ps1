@@ -88,7 +88,7 @@ function Start-PIMActivation {
         [Parameter(HelpMessage = "Include PIM-enabled groups in the activation interface")]
         [switch]$IncludeGroups,
         
-        [Parameter(HelpMessage = "Include Azure resource roles (Not yet implemented - planned for v2.0.0)")]
+        [Parameter(HelpMessage = "Include Azure resource roles in the activation interface")]
         [switch]$IncludeAzureResources,
         
         [Parameter(HelpMessage = "Skip confirmation prompts for automatic dependency resolution")]
@@ -101,111 +101,146 @@ function Start-PIMActivation {
         [string]$ClientId,
 
         [Parameter(HelpMessage = "Tenant ID to use with the specified app registration")]
-        [string]$TenantId
+        [string]$TenantId,
+        
+        [Parameter(HelpMessage = "Enable parallel processing for Azure subscriptions and PIM policies (requires PowerShell 7+)")]
+        [switch]$DisableParallelProcessing,
+        
+        [Parameter(HelpMessage = "Maximum concurrent operations for parallel processing of subscriptions and policies")]
+        [int]$ThrottleLimit = 10
     )
     
-    begin {
-        # Set default values for switches (PowerShell best practice)
-        if (-not $PSBoundParameters.ContainsKey('IncludeEntraRoles')) { $IncludeEntraRoles = $true }
-        if (-not $PSBoundParameters.ContainsKey('IncludeGroups')) { $IncludeGroups = $true }
-        Write-Verbose "Starting PIM Activation Tool initialization"
-        
-        # Validate PowerShell version requirement
-        if ($PSVersionTable.PSVersion.Major -lt 7) {
-            $errorMessage = "PowerShell 7 or later is required. Current version: $($PSVersionTable.PSVersion). Please upgrade from https://aka.ms/powershell"
-            Write-Error $errorMessage -Category InvalidOperation
-            throw $errorMessage
+begin {
+    # Set default values for switches (PowerShell best practice)
+    if (-not $PSBoundParameters.ContainsKey('IncludeEntraRoles')) { $IncludeEntraRoles = $true }
+    if (-not $PSBoundParameters.ContainsKey('IncludeGroups')) { $IncludeGroups = $true }
+    Write-Verbose "Starting PIM Activation Tool initialization"
+
+    # Initialize script-scoped caches safely (avoid unset variable runtime errors)
+    if (-not (Get-Variable -Name 'RoleCacheValidityMinutes' -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:RoleCacheValidityMinutes = 10
+    }
+    if (-not (Get-Variable -Name 'CachedEligibleRoles' -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:CachedEligibleRoles = @()
+    }
+    if (-not (Get-Variable -Name 'CachedActiveRoles' -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:CachedActiveRoles = @()
+    }
+    if (-not (Get-Variable -Name 'LastRoleFetchTime' -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:LastRoleFetchTime = $null
+    }
+    if (-not (Get-Variable -Name 'PolicyCache' -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:PolicyCache = @{}
+    }
+    if (-not (Get-Variable -Name 'AuthenticationContextCache' -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:AuthenticationContextCache = @{}
+    }
+    if (-not (Get-Variable -Name 'AzureRolesCache' -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:AzureRolesCache = @()
+    }
+    if (-not (Get-Variable -Name 'AzureRolesCacheTime' -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:AzureRolesCacheTime = $null
+    }
+
+    # Validate PowerShell version requirement
+    if ($PSVersionTable.PSVersion.Major -lt 7) {
+        $errorMessage = "PowerShell 7 or later is required. Current version: $($PSVersionTable.PSVersion). Please upgrade from https://aka.ms/powershell"
+        Write-Error $errorMessage -Category InvalidOperation
+        throw $errorMessage
+    }
+
+    try {
+        # Validate module dependencies before proceeding
+        $dependencyTest = Test-PIMDependencies
+        if (-not $dependencyTest.ReadyForActivation) {
+            Write-Error "Required module dependencies are missing or incorrect. Please resolve dependencies before proceeding." -Category InvalidOperation
+            return
         }
-        
-        try {
-            # Validate module dependencies before proceeding
-            if (-not (Test-PIMModuleDependencies)) {
-                Write-Error "Required module dependencies are missing or incorrect. Please resolve dependencies before proceeding." -Category InvalidOperation
+
+        # Check if user wants to proceed with starting the PIM activation tool
+        if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
+            Write-Verbose "Operation cancelled by user"
+            return
+        }
+
+        # Automatic dependency resolution with minimal output
+        if (-not $ManualDependencyCheck) {
+            Write-Verbose "Performing automatic dependency resolution..."
+            $dependencyResult = Resolve-PIMDependencies -Force:$Force
+
+            if (-not $dependencyResult.Success) {
+                Write-Error "Dependency resolution failed: $($dependencyResult.Errors -join '; ')" -Category OperationStopped
                 return
             }
-            
-            # Check if user wants to proceed with starting the PIM activation tool
-            if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
-                Write-Verbose "Operation cancelled by user"
-                return
-            }
-            
-            # Automatic dependency resolution with minimal output
-            if (-not $ManualDependencyCheck) {
-                Write-Verbose "Performing automatic dependency resolution..."
-                $dependencyResult = Resolve-PIMDependencies -Force:$Force
-                
-                if (-not $dependencyResult.Success) {
-                    Write-Error "Dependency resolution failed: $($dependencyResult.Errors -join '; ')" -Category OperationStopped
-                    return
-                }
-                
-                Write-Verbose "All dependencies resolved automatically"
-            }
-            else {
-                # Manual dependency checking (minimal output mode)
-                Write-Verbose "Checking PIM dependencies manually..."
-                $dependencyCheck = Test-PIMDependencies
-                
-                if (-not $dependencyCheck.ReadyForActivation) {
-                    switch ($dependencyCheck.OverallStatus) {
-                        'Version-Conflicts' {
-                            Write-Warning "Version conflicts detected. This may cause assembly loading errors."
-                            Write-Host "`nTo resolve conflicts automatically:" -ForegroundColor Yellow
-                            Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
-                            return
-                        }
-                        'Missing-Dependencies' {
-                            Write-Warning "Missing required dependencies."
-                            Write-Host "`nTo resolve dependencies automatically:" -ForegroundColor Yellow
-                            Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
-                            return
-                        }
-                        default {
-                            Write-Warning "Dependency check failed: $($dependencyCheck.OverallStatus)"
-                            return
-                        }
+
+            Write-Verbose "All dependencies resolved automatically"
+        }
+        else {
+            # Manual dependency checking (minimal output mode)
+            Write-Verbose "Checking PIM dependencies manually..."
+            $dependencyCheck = Test-PIMDependencies
+
+            if (-not $dependencyCheck.ReadyForActivation) {
+                switch ($dependencyCheck.OverallStatus) {
+                    'Version-Conflicts' {
+                        Write-Warning "Version conflicts detected. This may cause assembly loading errors."
+                        Write-Host "`nTo resolve conflicts automatically:" -ForegroundColor Yellow
+                        Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
+                        return
+                    }
+                    'Missing-Dependencies' {
+                        Write-Warning "Missing required dependencies."
+                        Write-Host "`nTo resolve dependencies automatically:" -ForegroundColor Yellow
+                        Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
+                        return
+                    }
+                    default {
+                        Write-Warning "Dependency check failed: $($dependencyCheck.OverallStatus)"
+                        return
                     }
                 }
-                
-                Write-Verbose "Dependencies verified successfully"
             }
+
+            Write-Verbose "Dependencies verified successfully"
         }
-        catch {
-            Write-Error "Failed to initialize PIM Activation: $($_.Exception.Message)" -Category OperationStopped
-            throw
-        }
-        
-        # Configure execution preferences
-        $originalVerbosePreference = $VerbosePreference
-        $originalWarningPreference = $WarningPreference
-        $originalProgressPreference = $ProgressPreference
-        
-        # Preserve user's verbose preference while silencing other noise
-        if ($PSCmdlet.MyInvocation.BoundParameters.ContainsKey('Verbose')) {
-            $script:UserVerbose = $true
-            Write-Verbose "Verbose output enabled by user"
-        } else {
-            $script:UserVerbose = $false
-        }
-        
-        $WarningPreference = 'SilentlyContinue'
-        $ProgressPreference = 'SilentlyContinue'
-        
-        # Suppress Azure PowerShell breaking change warnings
-        $env:SuppressAzurePowerShellBreakingChangeWarnings = 'true'
-        
-        # Initialize session state variables
-        $script:RestartRequested = $false
-        
-        Write-Verbose "Initialization parameters: EntraRoles=$IncludeEntraRoles, Groups=$IncludeGroups, AzureResources=$IncludeAzureResources"
     }
+    catch {
+        Write-Error "Failed to initialize PIM Activation: $($_.Exception.Message)" -Category OperationStopped
+        throw
+    }
+
+    # Configure execution preferences
+    $originalVerbosePreference = $VerbosePreference
+    $originalWarningPreference = $WarningPreference
+    $originalProgressPreference = $ProgressPreference
+
+    # Preserve user's verbose preference while silencing other noise
+    if ($PSCmdlet.MyInvocation.BoundParameters.ContainsKey('Verbose')) {
+        $script:UserVerbose = $true
+        Write-Verbose "Verbose output enabled by user"
+    }
+    else {
+        $script:UserVerbose = $false
+    }
+
+    $WarningPreference = 'SilentlyContinue'
+    $ProgressPreference = 'SilentlyContinue'
+
+    # Suppress Azure PowerShell breaking change warnings
+    $env:SuppressAzurePowerShellBreakingChangeWarnings = 'true'
+
+    # Initialize session state variables
+    $script:RestartRequested = $false
+
+    Write-Verbose "Initialization parameters: EntraRoles=$IncludeEntraRoles, Groups=$IncludeGroups, AzureResources=$IncludeAzureResources"
+}
     
     process {
         # Set up verbose preference early (needed for Initialize-PIMModules call)
         if ($PSCmdlet.MyInvocation.BoundParameters.ContainsKey('Verbose')) {
             $script:UserVerbose = $true
-        } else {
+        }
+        else {
             $script:UserVerbose = $false
         }
         
@@ -242,20 +277,23 @@ function Start-PIMActivation {
                 Write-Verbose "Validating required PowerShell modules"
                 Update-LoadingStatus -SplashForm $splashForm -Status "Checking dependencies..." -Progress 10
                 
-                # Add Azure modules if Azure resources are requested
-                if ($IncludeAzureResources) {
-                    Write-Warning "Azure Resource role management is not yet implemented. This parameter will be functional in version 2.0.0."
-                    Write-Verbose "Setting IncludeAzureResources to false - feature not yet implemented"
-                    $IncludeAzureResources = $false
-                    $script:IncludeAzureResources = $false
-                }
+                # Azure modules will be loaded automatically when IncludeAzureResources is specified
                 
                 # Install/update required modules with progress tracking
                 # Initialize PIM modules with version pinning
                 Write-Verbose "Initializing PIM modules with version pinning"
                 Update-LoadingStatus -SplashForm $splashForm -Status "Initializing PIM modules..." -Progress 30
                 
-                $moduleResult = Initialize-PIMModules -Verbose:$script:UserVerbose
+                $moduleParams = @{
+                    Verbose = $script:UserVerbose
+                }
+                
+                # Include Azure modules if Azure resources are requested
+                if ($IncludeAzureResources) {
+                    $moduleParams.IncludeAzureModules = $true
+                }
+                
+                $moduleResult = Initialize-PIMModules @moduleParams
                 
                 if (-not $moduleResult.Success) {
                     throw "Module initialization failed: $($moduleResult.Error)"
@@ -267,7 +305,9 @@ function Start-PIMActivation {
                 
                 # Build params only if explicitly provided
                 $connectionParams = @{
-                    IncludeEntraRoles = $script:IncludeEntraRoles
+                    IncludeEntraRoles     = $script:IncludeEntraRoles
+                    IncludeGroups         = $script:IncludeGroups
+                    IncludeAzureResources = $script:IncludeAzureResources
                 }
                 if ($PSBoundParameters.ContainsKey('ClientId') -and $ClientId) {
                     $connectionParams.ClientId = $ClientId
@@ -276,7 +316,8 @@ function Start-PIMActivation {
                     $connectionParams.TenantId = $TenantId
                 }
                 
-                Update-LoadingStatus -SplashForm $splashForm -Status "Authenticating user..." -Progress 60
+                # Delegate fine-grained status updates to Connect-PIMServices
+                $connectionParams.SplashForm = $splashForm
                 $connectionResult = Connect-PIMServices @connectionParams
                 
                 if (-not $connectionResult.Success) {
@@ -284,6 +325,7 @@ function Start-PIMActivation {
                 }
                 
                 Write-Verbose "Connected as user: $($connectionResult.CurrentUser.UserPrincipalName)"
+                # Progress updates from Connect-PIMServices already advanced
                 Update-LoadingStatus -SplashForm $splashForm -Status "Loading user profile..." -Progress 70
                 
                 # Store connection context for session management
@@ -294,7 +336,7 @@ function Start-PIMActivation {
                 Write-Verbose "Building main application interface"
                 Update-LoadingStatus -SplashForm $splashForm -Status "Building interface..." -Progress 80
                 
-                $form = Initialize-PIMForm -SplashForm $splashForm -Verbose:$script:UserVerbose
+                $form = Initialize-PIMForm -SplashForm $splashForm -DisableParallelProcessing:$DisableParallelProcessing -ThrottleLimit $ThrottleLimit -Verbose:$script:UserVerbose
                 
                 if (-not $form) {
                     throw "Failed to create main application form"
