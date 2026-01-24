@@ -66,7 +66,8 @@ function Invoke-PIMRoleDeactivation {
                 $roleData = $item.Tag
                 $progressPercent = [int](($currentRole / $totalRoles) * 100)
                 
-                $operationSplash.UpdateStatus("Deactivating $($roleData.DisplayName)... ($currentRole of $totalRoles)", $progressPercent)
+                $scopeInfo = if ($roleData.Scope -and $roleData.Scope -ne "Directory") { " [$($roleData.Scope)]" } else { "" }
+                $operationSplash.UpdateStatus("Deactivating $($roleData.DisplayName)$scopeInfo ... ($currentRole of $totalRoles)", $progressPercent)
                 
                 Write-Verbose "Deactivating role: $($roleData.DisplayName) [Type: $($roleData.Type)]"
                 

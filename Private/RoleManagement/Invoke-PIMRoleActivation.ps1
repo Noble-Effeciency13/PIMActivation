@@ -168,7 +168,8 @@ function Invoke-PIMRoleActivation {
                     $progressPercent = [int](($currentRole / $totalRoles) * 100)
                     
                     if ($operationSplash -and -not $operationSplash.IsDisposed) {
-                        $operationSplash.UpdateStatus("Activating $($roleData.DisplayName)... ($currentRole of $totalRoles)", $progressPercent)
+                        $scopeInfo = if ($roleData.Scope -and $roleData.Scope -ne "Directory") { " [$($roleData.Scope)]" } else { "" }
+                        $operationSplash.UpdateStatus("Activating $($roleData.DisplayName)$scopeInfo ... ($currentRole of $totalRoles)", $progressPercent)
                     }
                     
                     Write-Verbose "Processing: $($roleData.DisplayName) [$($roleData.Type)] with individual auth context token acquisition"
@@ -221,7 +222,8 @@ function Invoke-PIMRoleActivation {
                 $progressPercent = [int](($currentRole / $totalRoles) * 100)
                 
                 if ($operationSplash -and -not $operationSplash.IsDisposed) {
-                    $operationSplash.UpdateStatus("Activating $($roleData.DisplayName)... ($currentRole of $totalRoles)", $progressPercent)
+                    $scopeInfo = if ($roleData.Scope -and $roleData.Scope -ne "Directory") { " [$($roleData.Scope)]" } else { "" }
+                    $operationSplash.UpdateStatus("Activating $($roleData.DisplayName)$scopeInfo... ($currentRole of $totalRoles)", $progressPercent)
                 }
                 
                 Write-Verbose "Processing: $($roleData.DisplayName) [$($roleData.Type)] with cached auth context token"
@@ -270,7 +272,8 @@ function Invoke-PIMRoleActivation {
             $progressPercent = [int](($currentRole / $totalRoles) * 100)
             
             if ($operationSplash -and -not $operationSplash.IsDisposed) {
-                $operationSplash.UpdateStatus("Activating $($roleData.DisplayName)... ($currentRole of $totalRoles)", $progressPercent)
+                $scopeInfo = if ($roleData.Scope -and $roleData.Scope -ne "Directory") { " [$($roleData.Scope)]" } else { "" }
+                $operationSplash.UpdateStatus("Activating $($roleData.DisplayName)$scopeInfo... ($currentRole of $totalRoles)", $progressPercent)
             }
             
             Write-Verbose "Processing: $($roleData.DisplayName) [$($roleData.Type)]"
