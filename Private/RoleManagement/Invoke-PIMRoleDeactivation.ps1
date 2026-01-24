@@ -29,21 +29,30 @@ function Invoke-PIMRoleDeactivation {
     
     Write-Verbose "Starting deactivation process for $($CheckedItems.Count) role(s)"
     
-    # Show operation splash
-    $operationSplash = Show-OperationSplash -Title "Role Deactivation" -InitialMessage "Preparing role deactivation..." -ShowProgressBar $true
+    # Initialize splash variable
+    $operationSplash = $null
     
     try {
-        # Confirm deactivation
-        $roleNames = @($CheckedItems | ForEach-Object { $_.Tag.DisplayName })
+        # Confirm deactivation first (before showing splash)
+        $roleNames = @($CheckedItems | ForEach-Object { 
+            if ($_.Tag.Scope -and $_.Tag.Scope -ne "Directory") {
+                "$($_.Tag.DisplayName) [$($_.Tag.Scope)]"
+            }
+            else {
+                $_.Tag.DisplayName
+            }
+        })
         $message = "Are you sure you want to deactivate the following role(s)?`n`n$($roleNames -join "`n")"
         
         $result = Show-TopMostMessageBox -Message $message -Title "Confirm Deactivation" -Buttons YesNo -Icon Question
         
         if ($result -ne 'Yes') {
             Write-Verbose "Deactivation cancelled by user"
-            $operationSplash.Close()
             return
         }
+        
+        # Show operation splash AFTER user confirms
+        $operationSplash = Show-OperationSplash -Title "Role Deactivation" -InitialMessage "Preparing role deactivation..." -ShowProgressBar $true
         
         # Process deactivations
         $deactivationErrors = @()
@@ -179,13 +188,8 @@ function Invoke-PIMRoleDeactivation {
             catch {
                 $errorMessage = if ($_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
                 
-                # Check for the 5-minute minimum active duration error
-                if ($errorMessage -match "duration.*too short" -or 
-                    $errorMessage -match "minimum.*5 minute" -or
-                    $errorMessage -match "ActiveDurationTooShort" -or 
-                    $errorMessage -match "The Active duration is too short" -or
-                    $errorMessage -match "Mindestdauer" -or
-                    $errorMessage -match "5 Minuten") {
+                # Check for  minimum active duration error
+                if ($errorMessage -match "Active.*duration.*too short") {
                     # Calculate remaining time if StartDateTime is available
                     $remainingTimeMsg = ""
                     if ($roleData.PSObject.Properties['StartDateTime'] -and $roleData.StartDateTime) {
@@ -206,8 +210,14 @@ function Invoke-PIMRoleDeactivation {
                     $errorMessage = "Role must be active for at least 5 minutes before it can be deactivated.$remainingTimeMsg"
                 }
                 
-                $deactivationErrors += "$($roleData.DisplayName): $errorMessage"
-                Write-Warning "Failed to deactivate $($roleData.DisplayName): $errorMessage"
+                # Build role identifier with resource info (same logic as Active Roles list)
+                $roleIdentifier = $roleData.DisplayName
+                if ($roleData.Scope -and $roleData.Scope -ne "Directory") {
+                    $roleIdentifier = "$($roleData.DisplayName) [$($roleData.Scope)]"
+                }
+
+                $deactivationErrors += "$roleIdentifier`: $errorMessage"
+                Write-Warning "Failed to deactivate $roleIdentifier`: $errorMessage"
             }
         }
         
@@ -224,17 +234,12 @@ function Invoke-PIMRoleDeactivation {
         Write-Verbose "Deactivation complete. Success: $successCount, Errors: $errorCount"
         
         if ($errorCount -gt 0) {
-            $message = "Deactivation Results:`n`nSuccessfully deactivated: $successCount of $totalRoles role(s)`n`nErrors ($errorCount):`n$($deactivationErrors -join "`n")"
+            $message = "Successfully deactivated: $successCount of $totalRoles role(s)`n`nErrors ($errorCount):`n`n$($deactivationErrors -join "`n`n")"
             Show-TopMostMessageBox -Message $message -Title "Deactivation Results" -Icon Warning
         }
         elseif ($successCount -gt 0) {
             Show-TopMostMessageBox -Message "Successfully deactivated all $successCount role(s)!" -Title "Success" -Icon Information
         }
-        else {
-            Show-TopMostMessageBox -Message "No roles were deactivated. Please try again." -Title "Deactivation" -Icon Information
-        }
-        
-        # Refresh role lists
         
         # Clear role cache to ensure fresh data is fetched after deactivation
         if ($successCount -gt 0) {
