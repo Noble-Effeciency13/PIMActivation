@@ -492,12 +492,13 @@ function Initialize-PIMForm {
                 $activeListView = $Form.Controls.Find('lstActive', $true)[0]
                 if ($activeListView -and $activeListView.CheckedItems.Count -gt 0) {
                     # Filter out permanent roles (no EndDateTime)
-                    $checkedItems = @($activeListView.CheckedItems) | Where-Object {
-                        $_ -is [System.Windows.Forms.ListViewItem] -and $_.Tag -and $_.Tag.PSObject.Properties['EndDateTime'] -and $_.Tag.EndDateTime
-                    }
-                    Write-Verbose "Found $($checkedItems.Count) deactivatable active role(s) after filtering permanent roles"
+                    $checkedItems = @(@($activeListView.CheckedItems) | Where-Object {
+                            $_ -is [System.Windows.Forms.ListViewItem] -and $_.Tag -and $_.Tag.PSObject.Properties['EndDateTime'] -and $_.Tag.EndDateTime
+                        })
+                    $checkedCount = ($checkedItems | Measure-Object).Count
+                    Write-Verbose "Found $checkedCount deactivatable active role(s) after filtering permanent roles"
                     
-                    if ($checkedItems.Count -gt 0) {
+                    if ($checkedCount -gt 0) {
                         # Call deactivation function
                         Invoke-PIMRoleDeactivation -CheckedItems $checkedItems -Form $Form
                     }
