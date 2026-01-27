@@ -29,26 +29,35 @@ function Invoke-PIMRoleDeactivation {
     
     Write-Verbose "Starting deactivation process for $($CheckedItems.Count) role(s)"
     
-    # Show operation splash
-    $operationSplash = Show-OperationSplash -Title "Role Deactivation" -InitialMessage "Preparing role deactivation..." -ShowProgressBar $true
+    # Initialize splash variable
+    $operationSplash = $null
     
     try {
-        # Confirm deactivation
-        $roleNames = @($CheckedItems | ForEach-Object { $_.Tag.DisplayName })
+        # Confirm deactivation first (before showing splash)
+        $roleNames = @($CheckedItems | ForEach-Object { 
+            if ($_.Tag.Scope -and $_.Tag.Scope -ne "Directory") {
+                "$($_.Tag.DisplayName) [$($_.Tag.Scope)]"
+            }
+            else {
+                $_.Tag.DisplayName
+            }
+        })
         $message = "Are you sure you want to deactivate the following role(s)?`n`n$($roleNames -join "`n")"
         
         $result = Show-TopMostMessageBox -Message $message -Title "Confirm Deactivation" -Buttons YesNo -Icon Question
         
         if ($result -ne 'Yes') {
             Write-Verbose "Deactivation cancelled by user"
-            $operationSplash.Close()
             return
         }
+        
+        # Show operation splash AFTER user confirms
+        $operationSplash = Show-OperationSplash -Title "Role Deactivation" -InitialMessage "Preparing role deactivation..." -ShowProgressBar $true
         
         # Process deactivations
         $deactivationErrors = @()
         $successCount = 0
-        $totalRoles = $CheckedItems.Count
+        $totalRoles = @($CheckedItems).Count
         $currentRole = 0
         
         foreach ($item in $CheckedItems) {
@@ -57,7 +66,8 @@ function Invoke-PIMRoleDeactivation {
                 $roleData = $item.Tag
                 $progressPercent = [int](($currentRole / $totalRoles) * 100)
                 
-                $operationSplash.UpdateStatus("Deactivating $($roleData.DisplayName)... ($currentRole of $totalRoles)", $progressPercent)
+                $scopeInfo = if ($roleData.Scope -and $roleData.Scope -ne "Directory") { " [$($roleData.Scope)]" } else { "" }
+                $operationSplash.UpdateStatus("Deactivating $($roleData.DisplayName)$scopeInfo ... ($currentRole of $totalRoles)", $progressPercent)
                 
                 Write-Verbose "Deactivating role: $($roleData.DisplayName) [Type: $($roleData.Type)]"
                 
@@ -91,7 +101,7 @@ function Invoke-PIMRoleDeactivation {
                         $requestBody.roleDefinitionId = $roleData.RoleDefinitionId
                         $requestBody.directoryScopeId = if ($roleData.DirectoryScopeId) { $roleData.DirectoryScopeId } else { "/" }
                         
-                        $response = New-MgRoleManagementDirectoryRoleAssignmentScheduleRequest -BodyParameter $requestBody
+                        $response = New-MgRoleManagementDirectoryRoleAssignmentScheduleRequest -BodyParameter $requestBody -ErrorAction Stop
                         Write-Verbose "Entra role deactivated successfully"
                         $successCount++
                     }
@@ -130,7 +140,7 @@ function Invoke-PIMRoleDeactivation {
                             }
                         }
                         
-                        $response = New-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleRequest -BodyParameter $groupRequestBody
+                        $response = New-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleRequest -BodyParameter $groupRequestBody -ErrorAction Stop
                         Write-Verbose "Group role deactivated successfully"
                         $successCount++
                     }
@@ -145,18 +155,19 @@ function Invoke-PIMRoleDeactivation {
 
                         $roleDefId = if ($roleData.RoleDefinitionId.StartsWith('/')) {
                             $roleData.RoleDefinitionId
-                        } else {
+                        }
+                        else {
                             "$($roleData.FullScope)/providers/Microsoft.Authorization/roleDefinitions/$($roleData.RoleDefinitionId)"
                         }
 
                         # Build deactivation parameters for Az.Resources
                         $deactivateParams = @{
-                            Name              = ([System.Guid]::NewGuid().ToString())
-                            Scope             = $roleData.FullScope
-                            RoleDefinitionId  = $roleDefId
-                            PrincipalId       = $script:CurrentUser.Id
-                            RequestType       = 'SelfDeactivate'
-                            Justification     = 'Deactivated via PowerShell'
+                            Name             = ([System.Guid]::NewGuid().ToString())
+                            Scope            = $roleData.FullScope
+                            RoleDefinitionId = $roleDefId
+                            PrincipalId      = $script:CurrentUser.Id
+                            RequestType      = 'SelfDeactivate'
+                            Justification    = 'Deactivated via PowerShell'
                         }
 
                         try {
@@ -177,24 +188,59 @@ function Invoke-PIMRoleDeactivation {
             }
             catch {
                 $errorMessage = if ($_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
-                $deactivationErrors += "$($roleData.DisplayName): $errorMessage"
-                Write-Warning "Failed to deactivate $($roleData.DisplayName): $errorMessage"
+                
+                # Check for  minimum active duration error
+                if ($errorMessage -match "Active.*duration.*too short") {
+                    # Calculate remaining time if StartDateTime is available
+                    $remainingTimeMsg = ""
+                    if ($roleData.PSObject.Properties['StartDateTime'] -and $roleData.StartDateTime) {
+                        try {
+                            $startTime = [DateTime]$roleData.StartDateTime
+                            $minimumEndTime = $startTime.AddMinutes(5)
+                            $now = [DateTime]::UtcNow
+                            if ($minimumEndTime -gt $now) {
+                                $remainingSeconds = [int]($minimumEndTime - $now).TotalSeconds
+                                $remainingMinutes = [math]::Ceiling($remainingSeconds / 60)
+                                $remainingTimeMsg = " Please wait approximately $remainingMinutes minute(s)."
+                            }
+                        }
+                        catch {
+                            Write-Verbose "Could not calculate remaining time: $_"
+                        }
+                    }
+                    $errorMessage = "Role must be active for at least 5 minutes before it can be deactivated.$remainingTimeMsg"
+                }
+                
+                # Build role identifier with resource info (same logic as Active Roles list)
+                $roleIdentifier = $roleData.DisplayName
+                if ($roleData.Scope -and $roleData.Scope -ne "Directory") {
+                    $roleIdentifier = "$($roleData.DisplayName) [$($roleData.Scope)]"
+                }
+
+                $deactivationErrors += "$roleIdentifier`: $errorMessage"
+                Write-Warning "Failed to deactivate $roleIdentifier`: $errorMessage"
             }
         }
         
         $operationSplash.UpdateStatus("Completing deactivation process...", 95)
         
-        # Display results
-        if ($deactivationErrors.Count -gt 0) {
-            $message = "Successfully deactivated $successCount of $totalRoles role(s).`n`nErrors:`n$($deactivationErrors -join "`n")"
-            Show-TopMostMessageBox -Message $message -Title "Deactivation Results" -Icon Warning
-        }
-        else {
-            Show-TopMostMessageBox -Message "Successfully deactivated all $successCount role(s)!" -Title "Success" -Icon Information
+        # Close splash before showing results dialog
+        if ($operationSplash -and -not $operationSplash.IsDisposed) {
+            $operationSplash.Close()
+            $operationSplash = $null
         }
         
-        # Refresh role lists
-        $operationSplash.UpdateStatus("Refreshing role lists...", 98)
+        # Display results - always show a message to the user
+        $errorCount = @($deactivationErrors).Count
+        Write-Verbose "Deactivation complete. Success: $successCount, Errors: $errorCount"
+        
+        if ($errorCount -gt 0) {
+            $message = "Successfully deactivated: $successCount of $totalRoles role(s)`n`nErrors ($errorCount):`n`n$($deactivationErrors -join "`n`n")"
+            Show-TopMostMessageBox -Message $message -Title "Deactivation Results" -Icon Warning
+        }
+        elseif ($successCount -gt 0) {
+            Show-TopMostMessageBox -Message "Successfully deactivated all $successCount role(s)!" -Title "Success" -Icon Information
+        }
         
         # Clear role cache to ensure fresh data is fetched after deactivation
         if ($successCount -gt 0) {
@@ -230,7 +276,7 @@ function Invoke-PIMRoleDeactivation {
                         if (Get-Variable -Name 'AzureActiveOverrides' -Scope Script -ErrorAction SilentlyContinue) {
                             $roleDefKey = $roleData.RoleDefinitionId
                             if ($roleDefKey -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $roleDefKey = $matches[1] }
-                               $overrideKey = "$($roleData.FullScope)|$($roleDefKey)"
+                            $overrideKey = "$($roleData.FullScope)|$($roleDefKey)"
                             if ($script:AzureActiveOverrides.ContainsKey($overrideKey)) {
                                 $null = $script:AzureActiveOverrides.Remove($overrideKey)
                                 Write-Verbose "Cleared Azure active override for $overrideKey after deactivation"
@@ -238,11 +284,12 @@ function Invoke-PIMRoleDeactivation {
                             # Also remove from AzureRolesCache if present
                             if (Get-Variable -Name 'AzureRolesCache' -Scope Script -ErrorAction SilentlyContinue) {
                                 $script:AzureRolesCache = @($script:AzureRolesCache | Where-Object {
-                                    if ($_.PSObject.Properties['RoleDefinitionId'] -and $_.PSObject.Properties['FullScope']) {
-                                        $rd = $_.RoleDefinitionId; if ($rd -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $rd = $matches[1] }
-                                        -not ($rd -eq $roleDefKey -and $_.FullScope -eq $roleData.FullScope)
-                                    } else { $true }
-                                })
+                                        if ($_.PSObject.Properties['RoleDefinitionId'] -and $_.PSObject.Properties['FullScope']) {
+                                            $rd = $_.RoleDefinitionId; if ($rd -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $rd = $matches[1] }
+                                            -not ($rd -eq $roleDefKey -and $_.FullScope -eq $roleData.FullScope)
+                                        }
+                                        else { $true }
+                                    })
                                 Write-Verbose "Pruned deactivated Azure role from AzureRolesCache for key $overrideKey"
                             }
                         }
@@ -268,5 +315,5 @@ function Invoke-PIMRoleDeactivation {
         }
     }
     
-    Write-Verbose "Deactivation process completed - Success: $successCount, Errors: $($deactivationErrors.Count)"
+    Write-Verbose "Deactivation process completed - Success: $successCount, Errors: $errorCount"
 }
