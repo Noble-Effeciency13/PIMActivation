@@ -14,6 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] - 2026-01-27
+
+### ✅ Enhancements
+- Management group display names: management-group scopes are now presented with friendly display names (or `/` for tenant root) instead of raw management-group IDs.
+- Suppress inherited eligible duplicates: subscription-scoped inherited eligible roles are now suppressed when the same role is available at the management-group level to avoid duplicate activation entries.
+- Temporary activation visibility: tenant-root and management-group active assignments are enriched with PIM activation Start/End windows so temporary activations show expiry rather than appearing permanently active.
+- Role definition normalization: normalize role definition identifiers to GUIDs during de-duplication to prevent duplicates caused by full-path vs GUID variants.
+- Import-time PSGallery notification: module import performs a best-effort PSGallery check and emits a Microsoft-style warning when a newer release is available (opt-out via `$script:SuppressUpdateNotification`).
+
+### 🛠️ Fixes
+- Activation/Deactivation Scope and Safety: Added explicit `Scope` support for activation/deactivation operations and improved error handling to prevent attempting to deactivate roles that have been activated for less than the required 5-minute grace period. (Thanks to Lukas Gosling (@l-gosling) for this contribution.)
+
+### Notes
+- These are additive fixes and enhancements focused on Azure resource role display, de-duplication, and temporary activation handling.
+
+
+---
+
 ## [2.0.0] - 2025-12-29
 
 ### 🚀 Major New Features - Azure Resources Support

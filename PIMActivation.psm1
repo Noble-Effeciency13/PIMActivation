@@ -27,6 +27,9 @@ $script:IncludeAzureResources = $false
 # Startup parameters (for restarts)
 $script:StartupParameters = @{}
 
+# Control runtime update-notification behavior. Can be set by consumers to suppress the PSGallery check.
+$script:SuppressUpdateNotification = $false
+
 # Restart flag
 $script:RestartRequested = $false
 
@@ -77,8 +80,6 @@ $script:RequiredModuleVersions = @{
     'Microsoft.Graph.Identity.Governance'          = '2.29.0'
     'Microsoft.Graph.Groups'                       = '2.29.0'
     'Microsoft.Graph.Identity.SignIns'             = '2.29.0'
-#    'Az.Accounts'                                  = '5.1.0'
-#    'Az.Resources'                                 = '6.0.0'
 }
 
 #endregion Module Setup
@@ -158,11 +159,54 @@ $script:DependenciesValidated = $false
 Write-Verbose "PIMActivation module loaded. Use Start-PIMActivation to begin."
 Write-Verbose "Dependencies will be validated and installed automatically when needed."
 
+# Check PowerShell Gallery for newer module version and notify on import (best-effort)
+try {
+    if (-not $script:SuppressUpdateNotification) {
+        if (Get-Command -Name Find-Module -Module PowerShellGet -ErrorAction SilentlyContinue) {
+            try {
+                $remote = Find-Module -Name $script:ModuleName -Repository PSGallery -ErrorAction SilentlyContinue
+                if ($remote -and $remote.Version) {
+                    $localVersion = $null
+                    try {
+                        $manifest = Join-Path $script:ModuleRoot "$($script:ModuleName).psd1"
+                        if (Test-Path $manifest) {
+                            $md = Import-PowerShellDataFile -Path $manifest
+                            $localVersion = [Version]($md.ModuleVersion)
+                        }
+                    } catch {}
+
+                    if (-not $localVersion) {
+                        # Fallback to module manifest discovery
+                        $localVersion = [Version]('0.0.0')
+                    }
+
+                    $remoteVersion = [Version]($remote.Version.ToString())
+                    if ($remoteVersion -gt $localVersion) {
+                        $psgalleryUrl = "https://www.powershellgallery.com/packages/$($script:ModuleName)/$($remoteVersion)"
+                        $msg = @()
+                        $msg += "A newer version of the module '$($script:ModuleName)' is available on the PowerShell Gallery."
+                        $msg += "Installed version: $localVersion"
+                        $msg += "Latest version:    $remoteVersion"
+                        $msg += "To update this module, run:     Update-Module -Name $($script:ModuleName) -Force"
+                        $msg += "If Update-Module is unavailable, you can install the latest version with: Install-Module -Name $($script:ModuleName) -Force"
+                        $msg += "More information: $psgalleryUrl"
+                        Write-Warning ($msg -join "`n")
+                    }
+                }
+            } catch {
+                Write-Verbose "PSGallery version check failed: $($_.Exception.Message)"
+            }
+        }
+    }
+} catch {
+    Write-Verbose "Update notification check encountered an error: $($_.Exception.Message)"
+}
 #endregion Module Initialization
 
 #region Cleanup
 
 # Clean up variables
 Remove-Variable -Name Private, Public, functionFolders, folder, folderPath, functions, function, privateRoot, import -ErrorAction SilentlyContinue
+
 
 #endregion Cleanup

@@ -154,12 +154,37 @@ function Get-AzureResourceRoles {
                                 Scope = 'Tenant'
                                 FullScope = $assignment.Scope
                                 MemberType = 'Inherited'
+                                StartDateTime = $null
                                 EndDateTime = $null
                                 ScopeDisplayName = 'Tenant Root'
                                 Id = $assignment.RoleDefinitionId
                                 ObjectId = $assignment.ObjectId
                                 PrincipalId = $assignment.ObjectId
                             }
+                            # Attempt to enrich tenant-root active assignment with activation schedule window (temporary activations)
+                            try {
+                                if (Get-Command Get-AzRoleAssignmentSchedule -ErrorAction SilentlyContinue) {
+                                    $roleDefGuid = $assignment.RoleDefinitionId
+                                    if ($roleDefGuid -match "/providers/Microsoft\\.Authorization/roleDefinitions/([a-fA-F0-9\\-]{36})") { $roleDefGuid = $matches[1] }
+                                    $roleDefPath = "/providers/Microsoft.Authorization/roleDefinitions/$roleDefGuid"
+                                    $filter = "principalId eq '$UserObjectId' and roleDefinitionId eq '$roleDefPath' and status eq 'Active'"
+                                    $sched = Get-AzRoleAssignmentSchedule -Scope "/" -Filter $filter -ErrorAction SilentlyContinue
+                                    $schedArr = @(); if ($sched) { $schedArr = ($sched -is [array]) ? $sched : @($sched) }
+                                    if ($schedArr.Count -gt 0) {
+                                        $selected = $schedArr | Sort-Object {
+                                            $end = $null
+                                            if ($_.PSObject.Properties["EndDateTime"]) { $end = $_.EndDateTime }
+                                            elseif ($_.PSObject.Properties["ScheduleInfo"]) { $end = $_.ScheduleInfo.Expiration.EndDateTime }
+                                            if (-not $end) { [datetime]::MinValue } else { [datetime]$end }
+                                        } -Descending | Select-Object -First 1
+
+                                        if ($selected.PSObject.Properties["StartDateTime"]) { $tenantRole.StartDateTime = $selected.StartDateTime }
+                                        if ($selected.PSObject.Properties["EndDateTime"])   { $tenantRole.EndDateTime   = $selected.EndDateTime }
+                                        if (-not $tenantRole.StartDateTime -and $selected.PSObject.Properties["ScheduleInfo"]) { $tenantRole.StartDateTime = $selected.ScheduleInfo.StartDateTime }
+                                        if (-not $tenantRole.EndDateTime   -and $selected.PSObject.Properties["ScheduleInfo"]) { $tenantRole.EndDateTime   = $selected.ScheduleInfo.Expiration.EndDateTime }
+                                    }
+                                }
+                            } catch { Write-Verbose "Failed to enrich tenant-root active role time window: $($_.Exception.Message)" }
                             $allRoles.Add($tenantRole) | Out-Null
                         }
                         Write-Verbose "Found $(@($tenantRootActive).Count) tenant root active assignments"
@@ -205,13 +230,28 @@ function Get-AzureResourceRoles {
                             
                         # Process management group roles found in tenant root query and collect MG info
                         $isDuplicate = $false
-                        $isMGRole = $false
                         if ($roleName -ne "Unknown Role") {
                             # Check if this role is from a management group - process it here instead of skipping
                             if ($schedule.Scope -match "^/providers/Microsoft\.Management/managementGroups/([^/]+)$") {
                                 $mgName = $matches[1]
                                 Write-Verbose "Processing management group role '$roleName' found in tenant root query - MG: $mgName"
-                                
+
+                                # Resolve friendly display name for management group when possible
+                                $mgDisplay = $mgName
+                                try {
+                                    $mgInfoLookup = Get-AzManagementGroup -GroupId $mgName -ErrorAction SilentlyContinue
+                                    if ($mgInfoLookup -and $mgInfoLookup.DisplayName) {
+                                        if ($mgName -eq 'root' -or $mgInfoLookup.Name -eq 'root' -or $mgInfoLookup.DisplayName -match "(?i)tenant root") {
+                                            $mgDisplay = '/'
+                                        }
+                                        else { $mgDisplay = $mgInfoLookup.DisplayName }
+                                    }
+                                    else { if ($mgName -eq 'root') { $mgDisplay = '/' } }
+                                } catch {
+                                    Write-Verbose "Could not resolve management group display name for '$mgName' - using id"
+                                    if ($mgName -eq 'root') { $mgDisplay = '/' }
+                                }
+
                                 # Create management group role object
                                 $mgRole = [PSCustomObject]@{
                                     Type = 'AzureResource'
@@ -221,27 +261,24 @@ function Get-AzureResourceRoles {
                                     RoleDefinitionId = $schedule.RoleDefinitionId
                                     SubscriptionId = $null
                                     SubscriptionName = $null
-                                    ResourceName = $mgName
-                                    ResourceDisplayName = $mgName
+                                    ResourceName = $mgDisplay
+                                    ResourceDisplayName = $mgDisplay
                                     Scope = 'Management Group'
                                     FullScope = $schedule.Scope
                                     MemberType = 'Direct'
                                     EndDateTime = $schedule.EndDateTime
-                                    ScopeDisplayName = "MG: $mgName"
+                                    ScopeDisplayName = if ($mgDisplay -eq '/') { '/' } else { "MG: $mgDisplay" }
                                     Id = $schedule.RoleDefinitionId
                                     ObjectId = $schedule.PrincipalId
                                     PrincipalId = $schedule.PrincipalId
                                 }
                                 $allRoles.Add($mgRole) | Out-Null
-                                Write-Verbose "Added management group role: $roleName on MG $mgName"
-                                
-                                # Add this MG to our discovery list for active role checking
-                                if (-not $script:DiscoveredManagementGroups) {
-                                    $script:DiscoveredManagementGroups = [System.Collections.Generic.HashSet[string]]::new()
-                                }
+                                Write-Verbose "Added management group role: $roleName on MG $mgDisplay"
+
+                                # Add this MG to our discovery list for active role checking (use identifier name)
+                                if (-not $script:DiscoveredManagementGroups) { $script:DiscoveredManagementGroups = [System.Collections.Generic.HashSet[string]]::new() }
                                 $script:DiscoveredManagementGroups.Add($mgName) | Out-Null
-                                
-                                $isMGRole = $true
+
                                 $isDuplicate = $true  # Skip normal tenant root processing
                             }
                             # Check if this is really at tenant root
@@ -392,6 +429,12 @@ function Get-AzureResourceRoles {
                             $mgActive = Get-AzRoleAssignment -Scope $mgScope -ObjectId $UserObjectId -ErrorAction SilentlyContinue
                             if ($mgActive) {
                                 foreach ($assignment in @($mgActive)) {
+                                    # Only include assignments that are direct to this management group (scope must equal the mg scope)
+                                    if ($assignment.Scope -ne $mgScope) {
+                                        Write-Verbose "Skipping active assignment with scope '$($assignment.Scope)' on $($mg.DisplayName) because it is inherited from a different scope"
+                                        continue
+                                    }
+
                                     $mgRole = [PSCustomObject]@{
                                         Type = 'AzureResource'
                                         DisplayName = $assignment.RoleDefinitionName
@@ -405,12 +448,38 @@ function Get-AzureResourceRoles {
                                         Scope = 'Management Group'
                                         FullScope = $assignment.Scope
                                         MemberType = 'Direct'
+                                        StartDateTime = $null
                                         EndDateTime = $null
                                         ScopeDisplayName = "MG: $($mg.DisplayName)"
                                         Id = $assignment.RoleDefinitionId
                                         ObjectId = $assignment.ObjectId
                                         PrincipalId = $assignment.ObjectId
                                     }
+                                    # Attempt to enrich MG active assignment with activation schedule window (temporary activations)
+                                    try {
+                                        if (Get-Command Get-AzRoleAssignmentSchedule -ErrorAction SilentlyContinue) {
+                                            $roleDefGuid = $assignment.RoleDefinitionId
+                                            if ($roleDefGuid -match "/providers/Microsoft\\.Authorization/roleDefinitions/([a-fA-F0-9\\-]{36})") { $roleDefGuid = $matches[1] }
+                                            $roleDefPath = "$mgScope/providers/Microsoft.Authorization/roleDefinitions/$roleDefGuid"
+                                            $filter = "principalId eq '$UserObjectId' and roleDefinitionId eq '$roleDefPath' and status eq 'Active'"
+                                            $sched = Get-AzRoleAssignmentSchedule -Scope $mgScope -Filter $filter -ErrorAction SilentlyContinue
+                                            $schedArr = @(); if ($sched) { $schedArr = ($sched -is [array]) ? $sched : @($sched) }
+                                            if ($schedArr.Count -gt 0) {
+                                                $selected = $schedArr | Sort-Object {
+                                                    $end = $null
+                                                    if ($_.PSObject.Properties["EndDateTime"]) { $end = $_.EndDateTime }
+                                                    elseif ($_.PSObject.Properties["ScheduleInfo"]) { $end = $_.ScheduleInfo.Expiration.EndDateTime }
+                                                    if (-not $end) { [datetime]::MinValue } else { [datetime]$end }
+                                                } -Descending | Select-Object -First 1
+
+                                                if ($selected.PSObject.Properties["StartDateTime"]) { $mgRole.StartDateTime = $selected.StartDateTime }
+                                                if ($selected.PSObject.Properties["EndDateTime"])   { $mgRole.EndDateTime   = $selected.EndDateTime }
+                                                if (-not $mgRole.StartDateTime -and $selected.PSObject.Properties["ScheduleInfo"]) { $mgRole.StartDateTime = $selected.ScheduleInfo.StartDateTime }
+                                                if (-not $mgRole.EndDateTime   -and $selected.PSObject.Properties["ScheduleInfo"]) { $mgRole.EndDateTime   = $selected.ScheduleInfo.Expiration.EndDateTime }
+                                            }
+                                        }
+                                    } catch { Write-Verbose "Failed to enrich MG active role time window: $($_.Exception.Message)" }
+
                                     $allRoles.Add($mgRole) | Out-Null
                                     Write-Verbose "Found active management group role: $($assignment.RoleDefinitionName) on $($mg.DisplayName)"
                                 }
@@ -473,6 +542,23 @@ function Get-AzureResourceRoles {
             }
             catch {
                 Write-Verbose "Management group processing failed: $($_.Exception.Message)"
+            }
+
+            # Build a set of RoleDefinitionIds that exist as Management Group-level eligible roles
+            # This helps skipping subscription-scoped inherited duplicates for eligible roles
+            try {
+                $mgEligibleRoleDefIds = [System.Collections.Generic.HashSet[string]]::new()
+                foreach ($r in $allRoles) {
+                    if ($r.Scope -eq 'Management Group' -and $r.Status -eq 'Eligible' -and $r.RoleDefinitionId) {
+                        $rd = $r.RoleDefinitionId
+                        if ($rd -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $rd = $matches[1] }
+                        $mgEligibleRoleDefIds.Add($rd) | Out-Null
+                    }
+                }
+                Write-Verbose "Prepared $($mgEligibleRoleDefIds.Count) management-group eligible role definition ids for duplicate suppression"
+            } catch {
+                Write-Verbose "Failed to prepare MG eligible role id set: $($_.Exception.Message)"
+                $mgEligibleRoleDefIds = [System.Collections.Generic.HashSet[string]]::new()
             }
         }
 
@@ -656,6 +742,7 @@ function Get-AzureResourceRoles {
                 $IncludeEligibleLocal = $using:IncludeEligible
                 $allSubscriptionRolesLocal = $using:allSubscriptionRoles
                 $processedCountLocal = $using:processedCount
+                $mgEligibleRoleDefIdsLocal = $using:mgEligibleRoleDefIds
                 
                 try {
                     Write-Verbose "[Parallel] Starting subscription: $($subscription.Name) ($($subscription.Id))"
@@ -951,7 +1038,15 @@ function Get-AzureResourceRoles {
                     
                     Write-Verbose "Final member type for eligible ${roleDefinitionName}: $memberType (Scope: $assignmentScope)"
                     Write-Verbose "Scope display will show: $scopeDisplayName"
-                    
+
+                    # Skip subscription-level inherited eligible roles when the same role is eligible at a management group level
+                    $roleDefCheck = $roleDefId
+                    if ($roleDefCheck -and $roleDefCheck -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $roleDefCheck = $matches[1] }
+                    if ($memberType -eq 'Inherited' -and $mgEligibleRoleDefIdsLocal -and $mgEligibleRoleDefIdsLocal.Contains($roleDefCheck)) {
+                        Write-Verbose "[Parallel] Skipping inherited eligible role '$roleDefinitionName' in subscription '$($subscription.Name)' because MG-level eligible exists for role $roleDefCheck"
+                        continue
+                    }
+
                     $roleObject = [PSCustomObject]@{
                         RoleId              = "$($eligibleAssignment.Id ?? $eligibleAssignment.id ?? $eligibleAssignment.name)-$($subscription.Id)"
                         RoleDefinitionId    = $roleDefId
@@ -1288,7 +1383,15 @@ function Get-AzureResourceRoles {
                         
                         Write-Verbose "Final member type for eligible ${roleDefinitionName}: $memberType (Scope: $assignmentScope)"
                         Write-Verbose "Scope display will show: $scopeDisplayName"
-                        
+
+                        # Skip subscription-level inherited eligible roles when the same role is eligible at a management group level
+                        $roleDefCheck = $roleDefId
+                        if ($roleDefCheck -and $roleDefCheck -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $roleDefCheck = $matches[1] }
+                        if ($memberType -eq 'Inherited' -and $mgEligibleRoleDefIds -and $mgEligibleRoleDefIds.Contains($roleDefCheck)) {
+                            Write-Verbose "Skipping inherited eligible role '$roleDefinitionName' in subscription '$($subscription.Name)' because MG-level eligible exists for role $roleDefCheck"
+                            continue
+                        }
+
                         $roleObject = [PSCustomObject]@{
                             RoleId              = "$($eligibleAssignment.Id ?? $eligibleAssignment.id ?? $eligibleAssignment.name)-$($subscription.Id)"
                             RoleDefinitionId    = $roleDefId
@@ -1336,6 +1439,30 @@ function Get-AzureResourceRoles {
                 Write-Verbose "  [$i] $($r.DisplayName) | Status: $($r.Status) | Scope: $($r.FullScope) | Type: $($r.Type)"
             }
         }
+
+        # Post-process: map management group IDs to display names for any roles that still reference MG IDs
+        try {
+            $mgIdToDisplay = @{}
+            if ($managementGroups -and $managementGroups.Count -gt 0) {
+                foreach ($mg in $managementGroups) {
+                    if ($mg.Name -and $mg.DisplayName) { $mgIdToDisplay[$mg.Name] = $mg.DisplayName }
+                }
+            }
+
+            foreach ($role in $allRoles) {
+                if ($role.FullScope -and $role.FullScope -match "^/providers/Microsoft\.Management/managementGroups/([^/]+)$") {
+                    $mgId = $matches[1]
+                    if ($mgIdToDisplay.ContainsKey($mgId)) {
+                        $display = $mgIdToDisplay[$mgId]
+                        $role.ResourceDisplayName = $display
+                        $role.ResourceName = $display
+                        $role.ScopeDisplayName = if ($display -eq '/') { '/' } else { "MG: $display" }
+                    }
+                }
+            }
+        } catch {
+            Write-Verbose "MG post-processing failed: $($_.Exception.Message)"
+        }
         
         # Deduplicate roles based on RoleDefinitionId + Scope + Status
         $uniqueRoles = [System.Collections.ArrayList]::new()
@@ -1343,13 +1470,16 @@ function Get-AzureResourceRoles {
 
         try {
             foreach ($role in $allRoles) {
-                # Create a more specific unique key that includes subscription ID for subscription-scoped roles
-                $scopeKey = $role.FullScope
-                if ($role.SubscriptionId -and $role.FullScope -match "^/subscriptions/") {
-                    $scopeKey = "$(($role.FullScope))_sub:$(($role.SubscriptionId))"
-                }
+                # Normalize role definition id to GUID for consistent de-duplication
+                $roleDefGuid = $role.RoleDefinitionId
+                if ($roleDefGuid -and $roleDefGuid -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $roleDefGuid = $matches[1] }
 
-                $uniqueKey = "$(($role.RoleDefinitionId))_$scopeKey_$(($role.Status))"
+                # Create a more specific unique key that includes subscription ID for subscription-scoped roles
+                if ($role.SubscriptionId -and $role.FullScope -match "^/subscriptions/") {
+                    $uniqueKey = "${roleDefGuid}_$($role.FullScope)_sub:$($role.SubscriptionId)_$($role.Status)"
+                } else {
+                    $uniqueKey = "${roleDefGuid}_$($role.FullScope)_$($role.Status)"
+                }
                 Write-Verbose "Processing role: $($role.DisplayName) with key: $uniqueKey"
 
                 if (-not $seenRoles.Contains($uniqueKey)) {

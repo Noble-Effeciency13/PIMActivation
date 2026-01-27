@@ -3,7 +3,7 @@
     RootModule           = 'PIMActivation.psm1'
     
     # Version number of this module.
-    ModuleVersion        = '2.0.0'
+    ModuleVersion        = '2.1.0'
     
     # Supported PSEditions - Requires PowerShell Core (7+)
     CompatiblePSEditions = @('Core')
@@ -62,49 +62,22 @@
             # A URL to an icon representing this module.
             IconUri                  = 'https://raw.githubusercontent.com/Noble-Effeciency13/PIMActivation/main/Resources/icon.png'
             
-            # ReleaseNotes
-            ReleaseNotes             = @'
-## PIMActivation v2.0.0 - Azure Resources & Parallel Processing Engine
+                        # ReleaseNotes
+                        ReleaseNotes             = @'
+## PIMActivation v2.1.0 - Patch & Enhancements
 
-### 🚀 Major New Features
-- **Azure Resource Roles Support**: Full integration with Azure Resource PIM for subscription, resource group, and individual resource role management
-- **Parallel Processing Engine**: High-performance concurrent execution for all operations with real-time progress tracking
-- **Enhanced Role Display**: Azure roles display with [Azure] prefix and portal-aligned resource/scope columns
-- **Cross-Subscription Support**: Automatic enumeration and management across all accessible Azure subscriptions
-- **Modular Architecture**: Split functions into individual files for better maintainability
+### ✅ Enhancements
+- Management group display names: management-group scopes are now shown with their friendly display name (or `/` for tenant root) instead of raw MG IDs.
+- Inherited eligible role suppression: subscription-scoped inherited eligible roles are suppressed when the same role is available at the management-group level to avoid duplicate activation entries.
+- Temporary activation detection: initial tenant-root and management-group active assignments are enriched with PIM activation schedule Start/End windows so temporarily activated roles show expiry rather than appearing permanently active.
+- Role definition normalization: role definition identifiers are normalized (GUID) during deduplication to eliminate duplicates caused by full-path vs GUID variants.
+- Import-time PSGallery notification: on import the module performs a best-effort check against the PowerShell Gallery and warns when a newer release is available. The notification follows Microsoft module style and provides Update-Module / Install-Module examples. This check can be suppressed via `$script:SuppressUpdateNotification`.
 
-### ⚡ Performance Features
-- **Parallel Processing by Default**: Concurrent execution for Azure, Entra, and Group operations
-- **Real-Time Progress Tracking**: Enhanced verbose output with emoji indicators (🚀, ✅, ❌) and timing metrics
-- **Smart Throttling**: Default ThrottleLimit of 10 concurrent operations, configurable up to 50
-- **Thread-Safe Operations**: ConcurrentBag and ConcurrentDictionary for safe parallel result aggregation
+### 🛠️ Fixes (Community Contribution)
+- Activation/Deactivation Scope and Safety: Added explicit `Scope` support when activating and deactivating Azure PIM roles and improved error handling to prevent attempting to deactivate a role that was activated less than the required 5-minute window. (Thanks to Lukas Gosling (@l-gosling) for this contribution.)
 
-### ✅ Added
-- Complete Azure Resource role activation and deactivation support
-- Select All button for bulk role selection in GUI
-- `Get-AzureResourceRoles` function with parallel subscription processing
-- `Initialize-AzureResourceSupport` for Azure module management
-- `DisableParallelProcessing` parameter for sequential processing when needed
-- Enhanced scope parsing for Azure ARM resource hierarchies
-- Support for both PIM-eligible and active Azure Resource role assignments
-
-### 🔧 Enhanced Performance
-- All v1.2.x optimizations preserved and extended:
-  - ArrayList-based collections for optimal memory usage
-  - Batch API operations reducing Graph calls by 85%
-  - Memoized scope display name lookups
-  - Intelligent role deduplication and caching
-  - NEW: Parallel processing across all role types and policy operations
-
-### 📋 Requirements
-- PowerShell 7.0+ (required for parallel processing engine)
-- Az.Accounts 5.1.0+ and Az.Resources 6.0.0+ (auto-installed for Azure resources)
-- Microsoft Graph PowerShell modules (existing requirements preserved)
-
-### 📚 More
-- Changelog: https://github.com/Noble-Effeciency13/PIMActivation/blob/main/CHANGELOG.md
-- Blog Post: https://www.chanceofsecurity.com/post/microsoft-entra-pim-bulk-role-activation-tool
-- Releases:  https://github.com/Noble-Effeciency13/PIMActivation/releases
+### ⚡ Notes
+- These changes are additive and preserve existing public APIs. They improve display fidelity and de-duplication for Azure resource roles and make temporary activations visible as such in the UI.
 
 PowerShell module for comprehensive PIM role management across Entra ID, Groups, and Azure Resources with parallel processing engine and modern GUI.
 '@

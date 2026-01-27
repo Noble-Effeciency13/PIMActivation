@@ -15,6 +15,27 @@ function Get-FormattedScopeDisplay {
                 $scopeDisplay = "AU: $auId"
             }
         }
+        elseif ($Role.DirectoryScopeId -match "^/providers/Microsoft\.Management/managementGroups/([^/]+)$") {
+            $mgId = $Matches[1]
+            try {
+                $mgInfo = Get-AzManagementGroup -GroupId $mgId -ErrorAction SilentlyContinue
+                if ($mgInfo -and $mgInfo.DisplayName) {
+                    if ($mgId -eq 'root' -or $mgInfo.Name -eq 'root' -or $mgInfo.DisplayName -match "(?i)tenant root") {
+                        $scopeDisplay = "/"
+                    }
+                    else {
+                        $scopeDisplay = "MG: $($mgInfo.DisplayName)"
+                    }
+                }
+                else {
+                    if ($mgId -eq 'root') { $scopeDisplay = "/" } else { $scopeDisplay = "MG: $mgId" }
+                }
+            }
+            catch {
+                Write-Verbose "Could not retrieve Management Group info for ID: $mgId"
+                if ($mgId -eq 'root') { $scopeDisplay = "/" } else { $scopeDisplay = "MG: $mgId" }
+            }
+        }
         else {
             $scopeDisplay = $Role.DirectoryScopeId
         }
