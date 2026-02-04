@@ -275,6 +275,9 @@ function Update-PIMRolesList {
                             Update-LoadingStatus -SplashForm $SplashForm -Status "Processing $activeCount active roles..." -Progress 75
                         }
                         
+                        # Sort active roles by type+name, then scope
+                        $activeRoles = $activeRoles | Sort-Object @{Expression = {"[$($_.Type)] $($_.DisplayName)"}}, Scope
+                        
                         $itemIndex = 0
                         # Ensure Azure override map exists to avoid lookup errors
                         if (-not (Get-Variable -Name 'AzureActiveOverrides' -Scope Script -ErrorAction SilentlyContinue)) {
@@ -656,6 +659,9 @@ function Update-PIMRolesList {
                             $debugRole = $eligibleRoles[$i]
                             Write-Verbose "Role $($i + 1): DisplayName='$($debugRole.DisplayName)', Type='$($debugRole.Type)', Scope='$($debugRole.Scope)'"
                         }
+                        
+                        # Sort eligible roles by type+name, then scope
+                        $eligibleRoles = $eligibleRoles | Sort-Object @{Expression = {"[$($_.Type)] $($_.DisplayName)"}}, Scope
                         
                         # Update splash screen with role count
                         if ($PSBoundParameters.ContainsKey('SplashForm') -and $SplashForm -and -not $SplashForm.IsDisposed) {
