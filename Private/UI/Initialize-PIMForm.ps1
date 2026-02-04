@@ -472,6 +472,13 @@ function Initialize-PIMForm {
                 
                     # Execute role activation
                     Invoke-PIMRoleActivation -CheckedItems $eligibleListView.CheckedItems -Form $form
+                    
+                    # Clear checkboxes in eligible roles list after activation
+                    foreach ($item in $eligibleListView.Items) {
+                        if ($item -is [System.Windows.Forms.ListViewItem]) {
+                            $item.Checked = $false
+                        }
+                    }
                 }
                 else {
                     [System.Windows.Forms.MessageBox]::Show(
