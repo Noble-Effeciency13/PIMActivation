@@ -239,14 +239,23 @@ function Connect-PIMServices {
                 Write-Verbose "Connected tenant: $($azureContext.Context.Tenant.Id)"
 
                 # Enumerate subscriptions in current tenant and select a default context
-                $subscriptions = Get-AzSubscription -ErrorAction SilentlyContinue | Where-Object {
-                    $_.TenantId -eq $azureContext.Context.Tenant.Id -and $_.State -eq 'Enabled'
-                }
-                if (-not $subscriptions) {
-                    # Fallback to HomeTenantId property used in some environments
+                # Note: This may fail for users without standing subscription Reader access
+                # but PIM-eligible roles can still be discovered via the PIM API
+                try {
                     $subscriptions = Get-AzSubscription -ErrorAction SilentlyContinue | Where-Object {
-                        $_.HomeTenantId -eq $azureContext.Context.Tenant.Id -and $_.State -eq 'Enabled'
+                        $_.TenantId -eq $azureContext.Context.Tenant.Id -and $_.State -eq 'Enabled'
                     }
+                    if (-not $subscriptions) {
+                        # Fallback to HomeTenantId property used in some environments
+                        $subscriptions = Get-AzSubscription -ErrorAction SilentlyContinue | Where-Object {
+                            $_.HomeTenantId -eq $azureContext.Context.Tenant.Id -and $_.State -eq 'Enabled'
+                        }
+                    }
+                }
+                catch {
+                    Write-Verbose "Get-AzSubscription failed: $($_.Exception.Message)"
+                    Write-Verbose "This is expected if you don't have standing Reader access. PIM-eligible roles will still be discovered."
+                    $subscriptions = $null
                 }
 
                 if ($subscriptions) {
@@ -262,9 +271,11 @@ function Connect-PIMServices {
                     $script:AzureDefaultSubscriptionId = $defaultSub.Id
                     _UpdateStatus "Selected subscription: $($defaultSub.Name)" 85
                 } else {
-                    Write-Verbose "No Azure subscriptions accessible with current account in this tenant"
+                    Write-Verbose "No Azure subscriptions accessible via Get-AzSubscription"
+                    Write-Verbose "Subscriptions may still be discovered through PIM-eligible role assignments"
                     $script:AzureSubscriptions = @()
                     $script:AzureDefaultSubscriptionId = $null
+                    _UpdateStatus "Azure connected (PIM discovery mode)" 85
                 }
             }
             catch {
