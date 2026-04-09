@@ -85,10 +85,105 @@ function Get-AzureResourceRoles {
         
         # Get all accessible subscriptions and filter strictly to the HOME/current tenant
         Write-Verbose "Retrieving subscriptions for home tenant $currentTenantId..."
-        $allSubscriptions = Get-AzSubscription -ErrorAction Stop
+        $allSubscriptions = @()
+        $subscriptionEnumFailed = $false
+
+        try {
+            $allSubscriptions = Get-AzSubscription -ErrorAction Stop
+            if (-not $allSubscriptions) { $allSubscriptions = @() }
+            elseif ($allSubscriptions -isnot [array]) { $allSubscriptions = @($allSubscriptions) }
+        }
+        catch {
+            Write-Verbose "Failed to enumerate subscriptions via Get-AzSubscription: $($_.Exception.Message)"
+            $subscriptionEnumFailed = $true
+
+            # CATCH-22 SOLUTION: Use REST API to discover subscriptions through eligible role assignments
+            # This allows users without standing subscription Reader access to discover their PIM-eligible roles
+            Write-Verbose "Attempting to discover subscriptions via Azure Resource Manager PIM API (catch-22 workaround)..."
+            try {
+                $context = Get-AzContext -ErrorAction Stop
+                if ($context -and $context.Account.Id) {
+                    # Get Azure Resource Manager access token
+                    $token = [Microsoft.Azure.Commands.Common.Authentication.AzureSession]::Instance.AuthenticationFactory.Authenticate(
+                        $context.Account, $context.Environment, $context.Tenant.Id, $null, "Never", $null, "https://management.azure.com/"
+                    ).AccessToken
+
+                    $headers = @{
+                        'Authorization' = "Bearer $token"
+                        'Content-Type'  = 'application/json'
+                    }
+
+                    # Query tenant-level role eligibility schedules to discover subscriptions
+                    # This works because role eligibility data includes subscription information
+                    $uri = "https://management.azure.com/providers/Microsoft.Authorization/roleEligibilityScheduleInstances?api-version=2020-10-01&`$filter=asTarget()"
+                    Write-Verbose "Querying tenant-level role eligibilities: $uri"
+
+                    $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get -ErrorAction SilentlyContinue
+
+                    if ($response -and $response.value) {
+                        Write-Verbose "Found $(@($response.value).Count) role eligibility instances at tenant level"
+
+                        # Extract unique subscription IDs from role eligibility scopes
+                        $discoveredSubIds = [System.Collections.Generic.HashSet[string]]::new()
+                        foreach ($item in $response.value) {
+                            if ($item.properties.expandedProperties.scope.id -match "^/subscriptions/([a-fA-F0-9\-]{36})") {
+                                $subId = $matches[1]
+                                $discoveredSubIds.Add($subId) | Out-Null
+                            }
+                        }
+
+                        Write-Verbose "Discovered $($discoveredSubIds.Count) unique subscription(s) from role eligibilities"
+
+                        # Create minimal subscription objects for discovered subscriptions
+                        foreach ($subId in $discoveredSubIds) {
+                            try {
+                                # Try to get subscription details via REST API
+                                $subUri = "https://management.azure.com/subscriptions/${subId}?api-version=2020-01-01"
+                                $subResponse = Invoke-RestMethod -Uri $subUri -Headers $headers -Method Get -ErrorAction SilentlyContinue
+
+                                if ($subResponse) {
+                                    $allSubscriptions += [PSCustomObject]@{
+                                        Id            = $subResponse.subscriptionId
+                                        Name          = $subResponse.displayName
+                                        TenantId      = $subResponse.tenantId
+                                        HomeTenantId  = $subResponse.tenantId
+                                        State         = $subResponse.state
+                                    }
+                                    Write-Verbose "Retrieved subscription details: $($subResponse.displayName) ($subId)"
+                                }
+                                else {
+                                    # Fallback: create minimal object with just ID
+                                    $allSubscriptions += [PSCustomObject]@{
+                                        Id            = $subId
+                                        Name          = "Subscription $subId"
+                                        TenantId      = $currentTenantId
+                                        HomeTenantId  = $currentTenantId
+                                        State         = 'Enabled'
+                                    }
+                                    Write-Verbose "Created minimal subscription object for: $subId"
+                                }
+                            }
+                            catch {
+                                Write-Verbose "Could not retrieve details for subscription $subId, using minimal object: $($_.Exception.Message)"
+                                $allSubscriptions += [PSCustomObject]@{
+                                    Id            = $subId
+                                    Name          = "Subscription $subId"
+                                    TenantId      = $currentTenantId
+                                    HomeTenantId  = $currentTenantId
+                                    State         = 'Enabled'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch {
+                Write-Verbose "REST API subscription discovery also failed: $($_.Exception.Message)"
+            }
+        }
 
         # Filter to current tenant only (prefer HomeTenantId when available) and enabled subscriptions
-        $subscriptions = $allSubscriptions | Where-Object { 
+        $subscriptions = $allSubscriptions | Where-Object {
             $_.State -eq 'Enabled' -and $_.HomeTenantId -eq $currentTenantId
         }
 
@@ -99,19 +194,22 @@ function Get-AzureResourceRoles {
             $subscriptions = @($subscriptions | Where-Object { $subIdSet.Contains($_.Id) })
             Write-Verbose "Delta mode: restricting processing to subscriptions: $(@($subscriptions | ForEach-Object { $_.Id }) -join ', ')"
         }
-        
+
         # Fix Count property issue - handle single object vs array
         $subscriptionCount = if ($subscriptions) {
             if ($subscriptions -is [array]) { $subscriptions.Count } else { 1 }
         } else { 0 }
-        
+
         $allSubscriptionCount = if ($allSubscriptions -is [array]) { $allSubscriptions.Count } else { 1 }
-        
+
         Write-Verbose "Found $subscriptionCount accessible subscriptions in home tenant (filtered from $allSubscriptionCount total)"
-        
+
         if ($subscriptionCount -eq 0) {
-            Write-Verbose "No subscriptions found in home tenant"
-            return $allRoles.ToArray()
+            if ($subscriptionEnumFailed) {
+                Write-Warning "Unable to enumerate or discover subscriptions. You may need PIM-eligible roles at the subscription level to discover them."
+            }
+            Write-Verbose "No subscriptions found in home tenant - returning tenant root and management group roles only"
+            # Continue to process tenant root and management groups even without subscriptions
         }
         
         # Convert single subscription to array for consistent processing

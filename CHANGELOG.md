@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ✅ Enhancements
+- **Azure Subscription Discovery via PIM API**: Resolved catch-22 issue where users without standing subscription Reader access could not discover their PIM-eligible Azure roles. The module now uses the Azure Resource Manager PIM API to discover subscriptions through role eligibility data, eliminating the requirement for pre-existing subscription access. Users can now see and activate their eligible Azure roles even if they have no standing RBAC assignments.
+
+### 🛠️ Fixes
+- **Graceful Handling of Zero Subscriptions**: `Connect-PIMServices` now gracefully handles scenarios where `Get-AzSubscription` returns no results, treating it as expected behavior for users relying solely on PIM eligibilities rather than an error condition.
+
 ### Planned Features
 - **Profile Management**: Save and quickly activate frequently used role combinations and accounts
 - **Scheduling**: Plan role activations for future times

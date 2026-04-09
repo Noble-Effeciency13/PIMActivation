@@ -17,6 +17,7 @@ A comprehensive PowerShell module for managing Privileged Identity Management (P
 
 - 🎨 **Modern GUI Interface** - Clean, responsive Windows Forms application with real-time updates
 - 🔐 **Multi-Role Support** - Activate Microsoft Entra ID roles, PIM-enabled security groups, and Azure Resource roles
+- 🔓 **Zero Standing Access Required** - Discover and activate Azure PIM-eligible roles without needing standing subscription Reader access (resolves catch-22 scenario)
 - ⚡ **Parallel Processing Engine** - Lightning-fast parallel execution with real-time progress tracking and emoji indicators
 - 🚀 **High-Performance Batch API** - 85% reduction in API calls through intelligent batching, caching, and concurrent operations
 - 🎯 **Advanced Duplicate Role Handling** - Sophisticated MemberType-based classification system for managing roles with multiple assignment paths
