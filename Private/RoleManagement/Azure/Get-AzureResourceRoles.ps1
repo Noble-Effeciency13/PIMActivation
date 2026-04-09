@@ -11,6 +11,13 @@ function Get-AzureResourceRoles {
         PIM-eligible and PIM-activated role assignments for the specified user. Results are 
         formatted to align with Entra portal display conventions.
 
+        When the authenticated account has no standing subscription access (the PIM catch-22 scenario
+        where access is needed to discover the roles required to gain access), the function falls back
+        to the ARM REST API at tenant level:
+            GET /providers/Microsoft.Authorization/roleEligibilitySchedules?$filter=principalId eq '{id}'
+        This endpoint requires only an authenticated Azure context, not subscription read access, so
+        eligible roles can always be discovered and activated.
+
     .PARAMETER UserId
         The user ID (UPN) to retrieve roles for.
 
@@ -26,6 +33,7 @@ function Get-AzureResourceRoles {
         Requires Az.Accounts (5.1.0+) and Az.Resources (6.0.0+).
         Returns role objects with [Azure] prefix and Entra portal-aligned column mappings.
         Only processes subscriptions within the current authenticated tenant.
+        Falls back to ARM REST API when no subscriptions are accessible (no standing access).
     #>
     [CmdletBinding()]
     param(
@@ -85,7 +93,7 @@ function Get-AzureResourceRoles {
         
         # Get all accessible subscriptions and filter strictly to the HOME/current tenant
         Write-Verbose "Retrieving subscriptions for home tenant $currentTenantId..."
-        $allSubscriptions = Get-AzSubscription -ErrorAction Stop
+        $allSubscriptions = @(Get-AzSubscription -ErrorAction SilentlyContinue)
 
         # Filter to current tenant only (prefer HomeTenantId when available) and enabled subscriptions
         $subscriptions = $allSubscriptions | Where-Object { 
@@ -110,7 +118,97 @@ function Get-AzureResourceRoles {
         Write-Verbose "Found $subscriptionCount accessible subscriptions in home tenant (filtered from $allSubscriptionCount total)"
         
         if ($subscriptionCount -eq 0) {
-            Write-Verbose "No subscriptions found in home tenant"
+            Write-Verbose "No subscriptions found in home tenant - attempting ARM REST API fallback to discover eligible roles at tenant level"
+
+            # Resolve the catch-22: query tenant-level eligible role assignments via ARM REST API,
+            # which only requires an authenticated Azure context (no standing subscription access needed).
+            if ($IncludeEligible) {
+                try {
+                    # Validate UserObjectId is a GUID before embedding in OData filter
+                    if ($UserObjectId -notmatch "^[a-fA-F0-9]{8}-([a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12}$") {
+                        Write-Verbose "UserObjectId '$UserObjectId' is not a valid GUID - skipping ARM REST API fallback"
+                    } else {
+                    Write-Verbose "Querying tenant-level eligible role assignments via ARM REST API for principal: $UserObjectId"
+                    $armResponse = Invoke-AzRestMethod -Path "/providers/Microsoft.Authorization/roleEligibilitySchedules?api-version=2020-10-01&`$filter=principalId eq '$UserObjectId'" -Method GET -ErrorAction SilentlyContinue
+                    if ($armResponse -and $armResponse.StatusCode -eq 200) {
+                        $armContent = $armResponse.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+                        if ($armContent -and $armContent.value) {
+                            Write-Verbose "ARM REST API returned $(@($armContent.value).Count) tenant-level eligible role assignment(s)"
+                            foreach ($item in $armContent.value) {
+                                # Extract role definition GUID from full path
+                                $roleDefIdPath = $item.properties.roleDefinitionId
+                                $roleDefGuid   = $roleDefIdPath
+                                if ($roleDefGuid -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") {
+                                    $roleDefGuid = $matches[1]
+                                }
+
+                                # Resolve role name; fall back gracefully
+                                $roleDefName = "Unknown Role"
+                                try {
+                                    $roleDef = Get-AzRoleDefinition -Id $roleDefGuid -ErrorAction SilentlyContinue
+                                    if ($roleDef -and $roleDef.Name) { $roleDefName = $roleDef.Name }
+                                } catch { }
+
+                                # Determine scope display details
+                                $itemScope       = $item.properties.scope
+                                $scopeType       = "Subscription"
+                                $resourceDisplay = $itemScope
+                                $subId           = $null
+                                $subName         = $null
+
+                                if ($itemScope -match "^/subscriptions/([^/]+)$") {
+                                    $subId           = $matches[1]
+                                    $subName         = $subId
+                                    $scopeType       = "Subscription"
+                                    $resourceDisplay = $subId
+                                } elseif ($itemScope -match "^/providers/Microsoft\.Management/managementGroups/(.+)$") {
+                                    $scopeType       = "Management Group"
+                                    $resourceDisplay = $matches[1]
+                                } elseif ($itemScope -eq "/" -or $itemScope -eq "") {
+                                    $scopeType       = "Tenant"
+                                    $resourceDisplay = "/"
+                                }
+
+                                # Extract schedule expiry when present
+                                $endDateTime = $null
+                                if ($item.properties.scheduleInfo -and $item.properties.scheduleInfo.expiration) {
+                                    $endDateTime = $item.properties.scheduleInfo.expiration.endDateTime
+                                }
+
+                                $roleObject = [PSCustomObject]@{
+                                    RoleId              = "$($item.name)-tenant-fallback"
+                                    RoleDefinitionId    = $roleDefGuid
+                                    DisplayName         = $roleDefName
+                                    ResourceName        = $resourceDisplay
+                                    ResourceDisplayName = $resourceDisplay
+                                    ScopeDisplayName    = $resourceDisplay
+                                    Type                = "AzureResource"
+                                    Status              = "Eligible"
+                                    MemberType          = "Direct"
+                                    SubscriptionId      = $subId
+                                    SubscriptionName    = $subName
+                                    FullScope           = $itemScope
+                                    ObjectId            = $UserObjectId
+                                    StartDateTime       = $item.properties.scheduleInfo.startDateTime
+                                    EndDateTime         = $endDateTime
+                                    Scope               = $scopeType
+                                    FormattedScope      = $resourceDisplay
+                                }
+                                $allRoles.Add($roleObject) | Out-Null
+                                Write-Verbose "Added tenant-level eligible role via ARM REST API: $roleDefName at scope $itemScope"
+                            }
+                        } else {
+                            Write-Verbose "ARM REST API tenant-level query returned no eligible role assignments"
+                        }
+                    } else {
+                        Write-Verbose "ARM REST API fallback returned status: $($armResponse.StatusCode)"
+                    }
+                    } # end GUID validation
+                } catch {
+                    Write-Verbose "ARM REST API tenant-level eligible role fallback failed: $($_.Exception.Message)"
+                }
+            }
+
             return $allRoles.ToArray()
         }
         
