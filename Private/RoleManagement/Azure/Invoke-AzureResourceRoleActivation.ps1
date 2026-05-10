@@ -44,7 +44,13 @@ function Invoke-AzureResourceRoleActivation {
         [Parameter(Mandatory)]
         [hashtable]$ScheduleInfo,
         
-        [hashtable]$TicketInfo
+        [hashtable]$TicketInfo,
+
+        [string]$OriginalScope,
+
+        [bool]$IsReducedScope,
+
+        [string]$LinkedRoleEligibilityScheduleId
     )
     
     try {
@@ -64,8 +70,13 @@ function Invoke-AzureResourceRoleActivation {
         $requestName = [System.Guid]::NewGuid().ToString()
         
         # Ensure the role definition ID is in the correct format (full ARM resource ID)
+        $roleDefinitionScope = if ($OriginalScope) { $OriginalScope } else { $Scope }
         $fullRoleDefinitionId = if ($RoleDefinitionId.StartsWith('/')) {
             $RoleDefinitionId  # Already a full resource ID
+        } elseif ($roleDefinitionScope -match '^/subscriptions/([a-fA-F0-9\-]{36})') {
+            "/subscriptions/$($matches[1])/providers/Microsoft.Authorization/roleDefinitions/$RoleDefinitionId"
+        } elseif ($Scope -match '^/subscriptions/([a-fA-F0-9\-]{36})') {
+            "/subscriptions/$($matches[1])/providers/Microsoft.Authorization/roleDefinitions/$RoleDefinitionId"
         } else {
             "$Scope/providers/Microsoft.Authorization/roleDefinitions/$RoleDefinitionId"
         }
@@ -96,6 +107,11 @@ function Invoke-AzureResourceRoleActivation {
             if ($TicketInfo.TicketSystem) {
                 $activationParams.TicketSystem = $TicketInfo.TicketSystem
             }
+        }
+
+        if ($IsReducedScope -and $LinkedRoleEligibilityScheduleId) {
+            $activationParams.LinkedRoleEligibilityScheduleId = $LinkedRoleEligibilityScheduleId
+            Write-Verbose "Using reduced Azure activation scope: $OriginalScope -> $Scope"
         }
         
         Write-Verbose "Submitting Azure Resource role activation using New-AzRoleAssignmentScheduleRequest"

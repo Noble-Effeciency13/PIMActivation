@@ -16,7 +16,11 @@ function Invoke-SingleRoleActivation {
         
         [string]$AuthenticationContextId,
         
-        [switch]$UseFallbackMethod
+        [switch]$UseFallbackMethod,
+
+        [string]$AzureTargetScope,
+
+        [string]$LinkedRoleEligibilityScheduleId
     )
     
     Write-Verbose "Activating role: $($RoleData.DisplayName) [Type: $($RoleData.Type)]"
@@ -74,7 +78,16 @@ function Invoke-SingleRoleActivation {
             
             'AzureResource' {
                 # Get Azure-specific activation parameters
-                $azureParams = Get-RoleActivationParameters -RoleData $RoleData -Justification $Justification -EffectiveDuration $EffectiveDuration -TicketInfo $TicketInfo
+                $azureParamArgs = @{
+                    RoleData          = $RoleData
+                    Justification     = $Justification
+                    EffectiveDuration = $EffectiveDuration
+                    TicketInfo        = $TicketInfo
+                }
+                if ($AzureTargetScope) { $azureParamArgs.AzureTargetScope = $AzureTargetScope }
+                if ($LinkedRoleEligibilityScheduleId) { $azureParamArgs.LinkedRoleEligibilityScheduleId = $LinkedRoleEligibilityScheduleId }
+
+                $azureParams = Get-RoleActivationParameters @azureParamArgs
                 
                 # Azure Resource roles use direct function call
                 $response = Invoke-AzureResourceRoleActivation @azureParams

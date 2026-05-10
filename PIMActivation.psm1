@@ -24,6 +24,9 @@ $script:IncludeEntraRoles = $true
 $script:IncludeGroups = $true
 $script:IncludeAzureResources = $false
 
+# UI re-entrancy guard for the Azure Resources checkbox toggle
+$script:_suppressAzureToggle = $false
+
 # Startup parameters (for restarts)
 $script:StartupParameters = @{}
 
@@ -152,12 +155,53 @@ if ($Public) {
 
 #region Module Initialization
 
-# Smart dependency resolution - handles both development and production scenarios
-# This allows the module to work regardless of how it's imported
+# Eagerly import all required Graph modules at module-load time so that the first call
+# to Start-PIMActivation does not have to pay the module-import cost.
+# Az modules are NOT loaded here because they are optional / conditional at runtime.
 $script:DependenciesValidated = $false
 
-Write-Verbose "PIMActivation module loaded. Use Start-PIMActivation to begin."
-Write-Verbose "Dependencies will be validated and installed automatically when needed."
+try {
+    # Initialize-PIMModules sets $script:RequiredModuleVersions and validates availability
+    $script:_preloadResult = Initialize-PIMModules
+    if ($script:_preloadResult.Success) {
+        # Import Graph modules in dependency order
+        $script:_graphModuleOrder = @(
+            'Microsoft.Graph.Authentication',
+            'Microsoft.Graph.Identity.DirectoryManagement',
+            'Microsoft.Graph.Identity.Governance',
+            'Microsoft.Graph.Identity.SignIns',
+            'Microsoft.Graph.Groups',
+            'Microsoft.Graph.Users'
+        )
+        $allLoaded = $true
+        Write-Host "PIMActivation: loading dependencies..." -ForegroundColor Cyan
+        foreach ($mod in $script:_graphModuleOrder) {
+            $loadedOk = Import-PIMModule -ModuleName $mod
+            if ($loadedOk) {
+                $loadedModule = Get-Module -Name $mod -ErrorAction SilentlyContinue
+                $versionStr   = if ($loadedModule) { " v$($loadedModule.Version)" } else { '' }
+                Write-Host "  [√] $mod$versionStr" -ForegroundColor Green
+            }
+            else {
+                $allLoaded = $false
+                Write-Host "  [!] $mod – failed to load, will retry on Start-PIMActivation" -ForegroundColor Yellow
+            }
+        }
+        $script:DependenciesValidated = $allLoaded
+        if ($allLoaded) {
+            Write-Host "PIMActivation: all dependencies loaded. Run Start-PIMActivation to begin." -ForegroundColor Cyan
+        }
+    }
+    else {
+        # Modules not yet installed; Start-PIMActivation will install them on first call
+        Write-Warning "PIMActivation: required modules are not installed ($($script:_preloadResult.Error)). Run Start-PIMActivation to install them automatically."
+    }
+    Remove-Variable -Name _preloadResult, _graphModuleOrder -Scope Script -ErrorAction SilentlyContinue
+}
+catch {
+    # Non-fatal – Start-PIMActivation will retry dependency resolution
+    Write-Verbose "PIMActivation: module pre-load error: $($_.Exception.Message). Dependencies will be resolved on first run."
+}
 
 # Check PowerShell Gallery for newer module version and notify on import (best-effort)
 try {

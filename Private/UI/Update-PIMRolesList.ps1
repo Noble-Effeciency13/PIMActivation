@@ -709,9 +709,14 @@ function Update-PIMRolesList {
                                         }
                                         
                                         if ($roleId) {
-                                            $cacheKey = "Entra_$roleId"
-                                            if ($role.Type -eq 'Group') {
+                                            if ($role.Type -in @('AzureResource','Azure')) {
+                                                $cacheKey = "AzureResource_$roleId"
+                                            }
+                                            elseif ($role.Type -eq 'Group') {
                                                 $cacheKey = "Group_$roleId"
+                                            }
+                                            else {
+                                                $cacheKey = "Entra_$roleId"
                                             }
                                             
                                             if ($script:PolicyCache.ContainsKey($cacheKey)) {
@@ -918,31 +923,35 @@ function Update-PIMRolesList {
                                 $item.SubItems.Add($memberType) | Out-Null
 
                                 # Column 4: Maximum activation duration (moved from Column 3)
-                                $maxDuration = "8h"
-                                if ($policyInfo -and $policyInfo.MaxDuration) {
-                                    $hours = $policyInfo.MaxDuration
-                                    $maxDuration = "${hours}h"
-                                }
+                                $policyUnavailable = $policyInfo -and $policyInfo.PSObject.Properties['PolicyUnavailable'] -and $policyInfo.PolicyUnavailable
+                                $maxDuration = if ($policyUnavailable) { "N/A" }
+                                              elseif ($policyInfo -and $policyInfo.MaxDuration) { "$($policyInfo.MaxDuration)h" }
+                                              else { "8h" }
                                 $item.SubItems.Add($maxDuration) | Out-Null
                                 
                                 # Column 5: MFA (moved from Column 4) requirement
-                                $mfaRequired = if ($policyInfo -and $policyInfo.RequiresMFA) { "Yes" } else { "No" }
+                                $mfaRequired = if ($policyUnavailable) { "N/A" } elseif ($policyInfo -and $policyInfo.RequiresMFA) { "Yes" } else { "No" }
                                 $item.SubItems.Add($mfaRequired) | Out-Null
                                 
                                 # Column 6: Authentication context requirement (moved from Column 5)
-                                $authContext = if ($policyInfo -and $policyInfo.RequiresAuthenticationContext) { "Required" } else { "No" }
+                                $authContext = if ($policyUnavailable) { "N/A" }
+                                               elseif ($policyInfo -and $policyInfo.RequiresAuthenticationContext) {
+                                                   $contextId = if ($policyInfo.PSObject.Properties['AuthenticationContextId']) { $policyInfo.AuthenticationContextId } else { $null }
+                                                   if ($contextId) { "Required ($contextId)" } else { "Required" }
+                                               }
+                                               else { "No" }
                                 $item.SubItems.Add($authContext) | Out-Null
                                 
                                 # Column 7: Justification (moved from Column 6) requirement
-                                $justification = if ($policyInfo -and $policyInfo.RequiresJustification) { "Required" } else { "No" }
+                                $justification = if ($policyUnavailable) { "N/A" } elseif ($policyInfo -and $policyInfo.RequiresJustification) { "Required" } else { "No" }
                                 $item.SubItems.Add($justification) | Out-Null
                                 
                                 # Column 8: Ticket (moved from Column 7) requirement
-                                $ticket = if ($policyInfo -and $policyInfo.RequiresTicket) { "Yes" } else { "No" }
+                                $ticket = if ($policyUnavailable) { "N/A" } elseif ($policyInfo -and $policyInfo.RequiresTicket) { "Yes" } else { "No" }
                                 $item.SubItems.Add($ticket) | Out-Null
                                 
                                 # Column 9: Approval (moved from Column 8) requirement
-                                $approval = if ($policyInfo -and $policyInfo.RequiresApproval) { "Required" } else { "No" }
+                                $approval = if ($policyUnavailable) { "N/A" } elseif ($policyInfo -and $policyInfo.RequiresApproval) { "Required" } else { "No" }
                                 $item.SubItems.Add($approval) | Out-Null
                                 
                                 # Column 10: Pending Approval (moved from Column 9) status

@@ -54,174 +54,242 @@ function Invoke-PIMRoleDeactivation {
         # Show operation splash AFTER user confirms
         $operationSplash = Show-OperationSplash -Title "Role Deactivation" -InitialMessage "Preparing role deactivation..." -ShowProgressBar $true
         
-        # Process deactivations
+        # ── Build deactivation job list ──────────────────────────────────────────
         $deactivationErrors = @()
-        $successCount = 0
-        $totalRoles = @($CheckedItems).Count
-        $currentRole = 0
-        
+        $successCount       = 0
+        $totalRoles         = @($CheckedItems).Count
+        $currentRole        = 0
+
+        # Pre-resolve any missing ScheduleIds (must be done sequentially before batching)
+        $operationSplash.UpdateStatus("Resolving active schedule IDs...", 10)
+        $resolvedJobs = [System.Collections.ArrayList]::new()
+
         foreach ($item in $CheckedItems) {
+            $roleData = $item.Tag
+            $jobEntry = [PSCustomObject]@{
+                Item      = $item
+                RoleData  = $roleData
+                ScheduleId = $null
+                Error     = $null
+            }
+
             try {
-                $currentRole++
-                $roleData = $item.Tag
-                $progressPercent = [int](($currentRole / $totalRoles) * 100)
-                
-                $scopeInfo = if ($roleData.Scope -and $roleData.Scope -ne "Directory") { " [$($roleData.Scope)]" } else { "" }
-                $operationSplash.UpdateStatus("Deactivating $($roleData.DisplayName)$scopeInfo ... ($currentRole of $totalRoles)", $progressPercent)
-                
-                Write-Verbose "Deactivating role: $($roleData.DisplayName) [Type: $($roleData.Type)]"
-                
-                # Create cancellation request
-                $requestBody = @{
-                    principalId   = $script:CurrentUser.Id
-                    action        = "selfDeactivate"
-                    justification = "Deactivated via PowerShell"
-                }
-                
                 switch ($roleData.Type) {
                     'Entra' {
-                        # Find the active assignment schedule ID
-                        if ($roleData.ScheduleId) {
-                            $requestBody.roleAssignmentScheduleId = $roleData.ScheduleId
+                        $sid = if ($roleData.ScheduleId) { $roleData.ScheduleId } else {
+                            $active = @(Get-MgRoleManagementDirectoryRoleAssignmentSchedule `
+                                -Filter "principalId eq '$($script:CurrentUser.Id)' and roleDefinitionId eq '$($roleData.RoleDefinitionId)'" `
+                                -ErrorAction SilentlyContinue)
+                            if ($active -and $active.Count -gt 0) { $active[0].Id }
+                            else { throw "Could not find active assignment schedule for: $($roleData.DisplayName)" }
                         }
-                        else {
-                            # Query for the active schedule
-                            Write-Verbose "Querying for active role assignment schedules for RoleDefinitionId: $($roleData.RoleDefinitionId)"
-                            $activeSchedules = @(Get-MgRoleManagementDirectoryRoleAssignmentSchedule -Filter "principalId eq '$($script:CurrentUser.Id)' and roleDefinitionId eq '$($roleData.RoleDefinitionId)'" -ErrorAction SilentlyContinue)
-                            
-                            if ($activeSchedules -and $activeSchedules.Count -gt 0) {
-                                Write-Verbose "Found $($activeSchedules.Count) active schedule(s), using first one: $($activeSchedules[0].Id)"
-                                $requestBody.roleAssignmentScheduleId = $activeSchedules[0].Id
-                            }
-                            else {
-                                throw "Could not find active assignment schedule for deactivation of role: $($roleData.DisplayName)"
-                            }
-                        }
-                        
-                        $requestBody.roleDefinitionId = $roleData.RoleDefinitionId
-                        $requestBody.directoryScopeId = if ($roleData.DirectoryScopeId) { $roleData.DirectoryScopeId } else { "/" }
-                        
-                        $response = New-MgRoleManagementDirectoryRoleAssignmentScheduleRequest -BodyParameter $requestBody -ErrorAction Stop
-                        Write-Verbose "Entra role deactivated successfully"
-                        $successCount++
+                        $jobEntry.ScheduleId = $sid
                     }
-                    
                     'Group' {
-                        Write-Verbose "Processing group deactivation for GroupId: $($roleData.GroupId)"
-                        
-                        # Validate required group data
-                        if (-not $roleData.GroupId) {
-                            throw "Missing GroupId for group role deactivation: $($roleData.DisplayName)"
+                        if (-not $roleData.GroupId) { throw "Missing GroupId for group deactivation: $($roleData.DisplayName)" }
+                        $sid = if ($roleData.ScheduleId) { $roleData.ScheduleId } else {
+                            $active = @(Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentSchedule `
+                                -Filter "principalId eq '$($script:CurrentUser.Id)' and groupId eq '$($roleData.GroupId)'" `
+                                -ErrorAction SilentlyContinue)
+                            if ($active -and $active.Count -gt 0) { $active[0].Id }
+                            else { throw "Could not find active group assignment schedule for: $($roleData.DisplayName). It may not currently be active." }
                         }
-                        
-                        $groupRequestBody = @{
-                            principalId   = $script:CurrentUser.Id
-                            groupId       = $roleData.GroupId
-                            action        = "selfDeactivate"
-                            justification = "Deactivated via PowerShell"
-                            accessId      = "member"
-                        }
-                        
-                        # Find the active assignment schedule ID
-                        if ($roleData.ScheduleId) {
-                            $groupRequestBody.assignmentScheduleId = $roleData.ScheduleId
-                        }
-                        else {
-                            # Query for the active schedule
-                            Write-Verbose "Querying for active group assignment schedules for GroupId: $($roleData.GroupId)"
-                            $activeSchedules = @(Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentSchedule -Filter "principalId eq '$($script:CurrentUser.Id)' and groupId eq '$($roleData.GroupId)'" -ErrorAction SilentlyContinue)
-                            
-                            if ($activeSchedules -and $activeSchedules.Count -gt 0) {
-                                Write-Verbose "Found $($activeSchedules.Count) active schedule(s), using first one: $($activeSchedules[0].Id)"
-                                $groupRequestBody.assignmentScheduleId = $activeSchedules[0].Id
-                            }
-                            else {
-                                throw "Could not find active assignment schedule for group deactivation: $($roleData.DisplayName). The group role may not be currently active or may have been assigned through a different mechanism."
-                            }
-                        }
-                        
-                        $response = New-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleRequest -BodyParameter $groupRequestBody -ErrorAction Stop
-                        Write-Verbose "Group role deactivated successfully"
-                        $successCount++
+                        $jobEntry.ScheduleId = $sid
                     }
-                    
                     'AzureResource' {
-                        Write-Verbose "Processing Azure Resource role deactivation for scope: $($roleData.FullScope)"
-
-                        # Validate required Azure role data
                         if (-not $roleData.RoleDefinitionId -or -not $roleData.FullScope) {
-                            throw "Missing Azure Resource role details (RoleDefinitionId/Scope) for deactivation: $($roleData.DisplayName)"
+                            throw "Missing Azure Resource role details for deactivation: $($roleData.DisplayName)"
                         }
-
-                        $roleDefId = if ($roleData.RoleDefinitionId.StartsWith('/')) {
-                            $roleData.RoleDefinitionId
-                        }
-                        else {
-                            "$($roleData.FullScope)/providers/Microsoft.Authorization/roleDefinitions/$($roleData.RoleDefinitionId)"
-                        }
-
-                        # Build deactivation parameters for Az.Resources
-                        $deactivateParams = @{
-                            Name             = ([System.Guid]::NewGuid().ToString())
-                            Scope            = $roleData.FullScope
-                            RoleDefinitionId = $roleDefId
-                            PrincipalId      = $script:CurrentUser.Id
-                            RequestType      = 'SelfDeactivate'
-                            Justification    = 'Deactivated via PowerShell'
-                        }
-
-                        try {
-                            Write-Verbose "Submitting Azure Resource deactivation using New-AzRoleAssignmentScheduleRequest"
-                            $response = New-AzRoleAssignmentScheduleRequest @deactivateParams -ErrorAction Stop
-                            Write-Verbose "Azure Resource role deactivation request submitted successfully"
-                            $successCount++
-                        }
-                        catch {
-                            throw "Azure Resource deactivation failed: $($_.Exception.Message)"
-                        }
+                        # Azure Resource deactivation does not require a pre-fetched ScheduleId
                     }
-                    
-                    default {
-                        throw "Unsupported role type: $($roleData.Type)"
-                    }
+                    default { throw "Unsupported role type: $($roleData.Type)" }
                 }
             }
             catch {
-                $errorMessage = if ($_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
-                
-                # Check for  minimum active duration error
-                if ($errorMessage -match "Active.*duration.*too short") {
-                    # Calculate remaining time if StartDateTime is available
-                    $remainingTimeMsg = ""
-                    if ($roleData.PSObject.Properties['StartDateTime'] -and $roleData.StartDateTime) {
-                        try {
-                            $startTime = [DateTime]$roleData.StartDateTime
-                            $minimumEndTime = $startTime.AddMinutes(5)
-                            $now = [DateTime]::UtcNow
-                            if ($minimumEndTime -gt $now) {
-                                $remainingSeconds = [int]($minimumEndTime - $now).TotalSeconds
-                                $remainingMinutes = [math]::Ceiling($remainingSeconds / 60)
-                                $remainingTimeMsg = " Please wait approximately $remainingMinutes minute(s)."
-                            }
-                        }
-                        catch {
-                            Write-Verbose "Could not calculate remaining time: $_"
-                        }
+                $jobEntry.Error = if ($_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
+                Write-Warning "Pre-resolution failed for $($roleData.DisplayName): $($jobEntry.Error)"
+            }
+
+            $null = $resolvedJobs.Add($jobEntry)
+        }
+
+        # Separate into error / Graph / Azure batches
+        $graphJobs = @($resolvedJobs | Where-Object { -not $_.Error -and $_.RoleData.Type -in @('Entra', 'Group') })
+        $azureJobs = @($resolvedJobs | Where-Object { -not $_.Error -and $_.RoleData.Type -eq 'AzureResource' })
+
+        # Add pre-resolution failures directly to deactivationErrors
+        foreach ($failed in @($resolvedJobs | Where-Object { $_.Error })) {
+            $currentRole++
+            $deactivationErrors += "$($failed.RoleData.DisplayName): $($failed.Error)"
+        }
+
+        # ── Graph roles: Microsoft Graph $batch API ───────────────────────────
+        if ($graphJobs.Count -gt 0) {
+            $operationSplash.UpdateStatus("Submitting $($graphJobs.Count) Graph deactivation(s) in batch...", 30)
+
+            $batchBodies = [System.Collections.ArrayList]::new()
+            $batchMeta   = [System.Collections.ArrayList]::new()
+
+            foreach ($job in $graphJobs) {
+                $batchId = "$($batchBodies.Count + 1)"
+                $rd      = $job.RoleData
+
+                if ($rd.Type -eq 'Entra') {
+                    $reqBody = @{
+                        action                    = 'selfDeactivate'
+                        principalId               = $script:CurrentUser.Id
+                        roleDefinitionId          = $rd.RoleDefinitionId
+                        directoryScopeId          = if ($rd.DirectoryScopeId) { $rd.DirectoryScopeId } else { '/' }
+                        roleAssignmentScheduleId  = $job.ScheduleId
+                        justification             = 'Deactivated via PowerShell'
                     }
-                    $errorMessage = "Role must be active for at least 5 minutes before it can be deactivated.$remainingTimeMsg"
-                }
-                
-                # Build role identifier with resource info (same logic as Active Roles list)
-                $roleIdentifier = $roleData.DisplayName
-                if ($roleData.Scope -and $roleData.Scope -ne "Directory") {
-                    $roleIdentifier = "$($roleData.DisplayName) [$($roleData.Scope)]"
+                    $reqUrl = '/roleManagement/directory/roleAssignmentScheduleRequests'
+                } else {
+                    $reqBody = @{
+                        action               = 'selfDeactivate'
+                        principalId          = $script:CurrentUser.Id
+                        groupId              = $rd.GroupId
+                        accessId             = 'member'
+                        assignmentScheduleId = $job.ScheduleId
+                        justification        = 'Deactivated via PowerShell'
+                    }
+                    $reqUrl = '/identityGovernance/privilegedAccess/group/assignmentScheduleRequests'
                 }
 
-                $deactivationErrors += "$roleIdentifier`: $errorMessage"
-                Write-Warning "Failed to deactivate $roleIdentifier`: $errorMessage"
+                $null = $batchBodies.Add(@{
+                    id      = $batchId
+                    method  = 'POST'
+                    url     = $reqUrl
+                    headers = @{ 'Content-Type' = 'application/json' }
+                    body    = $reqBody
+                })
+                $null = $batchMeta.Add([PSCustomObject]@{ BatchId = $batchId; Job = $job })
+            }
+
+            $BATCH_SIZE = 20
+            for ($bi = 0; $bi -lt $batchBodies.Count; $bi += $BATCH_SIZE) {
+                $chunkEnd  = [Math]::Min($bi + $BATCH_SIZE - 1, $batchBodies.Count - 1)
+                $chunk     = @($batchBodies[$bi..$chunkEnd])
+                $batchBody = @{ requests = $chunk }
+                try {
+                    Write-Verbose "Submitting Graph deactivation batch ($($chunk.Count) request(s))"
+                    $batchResp = Invoke-MgGraphRequest -Method POST -Uri '$batch' -Body $batchBody -ErrorAction Stop
+                    foreach ($resp in @($batchResp.responses)) {
+                        $meta = $batchMeta | Where-Object { $_.BatchId -eq $resp.id } | Select-Object -First 1
+                        if (-not $meta) { continue }
+                        $currentRole++
+                        if ($resp.status -ge 200 -and $resp.status -lt 300) {
+                            Write-Verbose "$($meta.Job.RoleData.Type) role deactivated via batch"
+                            $successCount++
+                        } else {
+                            $errMsg = if ($resp.body -and $resp.body.error -and $resp.body.error.message) { $resp.body.error.message } else { "HTTP $($resp.status)" }
+                            $deactivationErrors += "$($meta.Job.RoleData.DisplayName): $errMsg"
+                            Write-Warning "Batch deactivation failed for $($meta.Job.RoleData.DisplayName): $errMsg"
+                        }
+                    }
+                }
+                catch {
+                    Write-Warning "Graph batch deactivation failed, falling back to sequential: $($_.Exception.Message)"
+                    foreach ($reqItem in $chunk) {
+                        $meta = $batchMeta | Where-Object { $_.BatchId -eq $reqItem.id } | Select-Object -First 1
+                        if (-not $meta) { continue }
+                        $currentRole++
+                        $rd = $meta.Job.RoleData
+                        try {
+                            if ($rd.Type -eq 'Entra') {
+                                $rb = @{
+                                    principalId              = $script:CurrentUser.Id
+                                    action                   = 'selfDeactivate'
+                                    justification            = 'Deactivated via PowerShell'
+                                    roleDefinitionId         = $rd.RoleDefinitionId
+                                    directoryScopeId         = if ($rd.DirectoryScopeId) { $rd.DirectoryScopeId } else { '/' }
+                                    roleAssignmentScheduleId = $meta.Job.ScheduleId
+                                }
+                                New-MgRoleManagementDirectoryRoleAssignmentScheduleRequest -BodyParameter $rb -ErrorAction Stop | Out-Null
+                            } else {
+                                $rb = @{
+                                    principalId          = $script:CurrentUser.Id
+                                    groupId              = $rd.GroupId
+                                    action               = 'selfDeactivate'
+                                    justification        = 'Deactivated via PowerShell'
+                                    accessId             = 'member'
+                                    assignmentScheduleId = $meta.Job.ScheduleId
+                                }
+                                New-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleRequest -BodyParameter $rb -ErrorAction Stop | Out-Null
+                            }
+                            Write-Verbose "$($rd.Type) role deactivated via sequential fallback"
+                            $successCount++
+                        }
+                        catch {
+                            $errMsg = if ($_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
+                            $deactivationErrors += "$($rd.DisplayName): $errMsg"
+                        }
+                    }
+                }
             }
         }
-        
+
+        # ── Azure Resource roles: parallel ARM REST PUT ───────────────────────
+        if ($azureJobs.Count -gt 0) {
+            $operationSplash.UpdateStatus("Submitting $($azureJobs.Count) Azure Resource deactivation(s) in parallel...", 60)
+
+            # Acquire ARM token once
+            $armTokDeact = $null
+            try {
+                $azCtxDeact = Get-AzContext -ErrorAction SilentlyContinue
+                if ($azCtxDeact) {
+                    $tokenObj = Get-AzAccessToken -ResourceUrl 'https://management.azure.com/' -ErrorAction Stop
+                    $armTokDeact = if ($tokenObj.Token -is [System.Security.SecureString]) {
+                        [System.Net.NetworkCredential]::new('', $tokenObj.Token).Password
+                    } else { $tokenObj.Token }
+                }
+            }
+            catch { Write-Verbose "Could not acquire ARM token for parallel deactivation: $($_.Exception.Message)" }
+
+            $azureDeactResults = $azureJobs | ForEach-Object -Parallel {
+                $job = $_
+                $rd  = $job.RoleData
+                $tok = $using:armTokDeact
+                try {
+                    $requestName = [System.Guid]::NewGuid().ToString()
+                    $roleDefId   = if ($rd.RoleDefinitionId.StartsWith('/')) {
+                        $rd.RoleDefinitionId
+                    } else {
+                        "$($rd.FullScope)/providers/Microsoft.Authorization/roleDefinitions/$($rd.RoleDefinitionId)"
+                    }
+                    $bodyObj = @{
+                        properties = @{
+                            roleDefinitionId = $roleDefId
+                            principalId      = $rd.PrincipalId
+                            requestType      = 'SelfDeactivate'
+                            justification    = 'Deactivated via PowerShell'
+                        }
+                    }
+                    $hdrs    = @{ 'Authorization' = "Bearer $tok"; 'Content-Type' = 'application/json' }
+                    $uri     = "https://management.azure.com$($rd.FullScope)/providers/Microsoft.Authorization/roleAssignmentScheduleRequests/$($requestName)?api-version=2020-10-01"
+                    $bodyJson = $bodyObj | ConvertTo-Json -Depth 8 -Compress
+                    $resp    = Invoke-RestMethod -Uri $uri -Headers $hdrs -Method Put -Body $bodyJson -ErrorAction Stop
+                    [PSCustomObject]@{ Success = $true; Job = $job; Response = $resp }
+                }
+                catch {
+                    [PSCustomObject]@{ Success = $false; Job = $job; ErrorMessage = $_.Exception.Message }
+                }
+            } -ThrottleLimit 5
+
+            foreach ($azResult in @($azureDeactResults)) {
+                $currentRole++
+                $rd = $azResult.Job.RoleData
+                if ($azResult.Success) {
+                    Write-Verbose "Azure Resource role deactivated in parallel: $($rd.DisplayName)"
+                    $successCount++
+                } else {
+                    $deactivationErrors += "$($rd.DisplayName): $($azResult.ErrorMessage)"
+                    Write-Warning "Azure Resource parallel deactivation failed for $($rd.DisplayName): $($azResult.ErrorMessage)"
+                }
+            }
+        }
+
+
         $operationSplash.UpdateStatus("Completing deactivation process...", 95)
         
         # Close splash before showing results dialog

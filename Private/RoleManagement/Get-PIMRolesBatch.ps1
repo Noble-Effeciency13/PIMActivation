@@ -939,17 +939,25 @@ function Get-PIMRolesBatch {
         $null = $uniqueRoleIds.AddRange(@($result.EligibleRoles | Where-Object { $_.Type -eq 'Entra' } | Select-Object -ExpandProperty RoleDefinitionId -Unique))
         $uniqueGroupIds = [System.Collections.ArrayList]::new()
         $null = $uniqueGroupIds.AddRange(@($result.EligibleRoles | Where-Object { $_.Type -eq 'Group' } | Select-Object -ExpandProperty GroupId -Unique))
-        # Add Azure resource roles to policy collection
+        # Add Azure resource roles to policy collection – union of eligible AND active
+        # so that directly-assigned roles (no eligible counterpart) also get policies.
         $uniqueAzureRoles = [System.Collections.ArrayList]::new()
+        $seenAzurePolicyKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         # Support both historical 'AzureResource' and normalized 'Azure' types
-        $azureResourceRoles = @($result.EligibleRoles | Where-Object { $_.Type -in @('AzureResource','Azure') })
+        $azureResourceRoles = @(
+            $result.EligibleRoles | Where-Object { $_.Type -in @('AzureResource','Azure') }
+            $result.ActiveRoles   | Where-Object { $_.Type -in @('AzureResource','Azure') }
+        )
         foreach ($azureRole in $azureResourceRoles) {
-            if ($azureRole.PSObject.Properties['RoleDefinitionId'] -and $azureRole.PSObject.Properties['FullScope']) {
-                $null = $uniqueAzureRoles.Add([PSCustomObject]@{
-                    RoleDefinitionId = $azureRole.RoleDefinitionId
-                    FullScope        = $azureRole.FullScope 
-                    SubscriptionId   = $azureRole.SubscriptionId
-                })
+            if ($azureRole.PSObject.Properties['RoleDefinitionId']) {
+                $pKey = [string]$azureRole.RoleDefinitionId
+                if ($seenAzurePolicyKeys.Add($pKey)) {
+                    $null = $uniqueAzureRoles.Add([PSCustomObject]@{
+                        RoleDefinitionId = $azureRole.RoleDefinitionId
+                        FullScope        = $azureRole.FullScope
+                        SubscriptionId   = $azureRole.SubscriptionId
+                    })
+                }
             }
         }
 
@@ -1005,7 +1013,7 @@ function Get-PIMRolesBatch {
             Write-Verbose "Fetching policies for $($uniqueAzureRoles.Count) Azure resource roles..."
             try {
                 foreach ($azureRole in $uniqueAzureRoles) {
-                    $cacheKey = "AzureResource_$($azureRole.FullScope)_$($azureRole.RoleDefinitionId)"
+                    $cacheKey = "AzureResource_$($azureRole.RoleDefinitionId)"
                     
                     if (-not $result.Policies.ContainsKey($cacheKey)) {
                         # Get Azure resource policy using the helper function
@@ -1019,7 +1027,7 @@ function Get-PIMRolesBatch {
                                 $script:PolicyCache[$cacheKey] = $azurePolicy
                             }
                             
-                            Write-Verbose "Cached Azure resource policy for role: $($azureRole.RoleDefinitionId) in scope: $($azureRole.FullScope)"
+                            Write-Verbose "Cached Azure resource policy for role: $($azureRole.RoleDefinitionId)"
                         }
                     }
                 }
@@ -1067,7 +1075,7 @@ function Get-PIMRolesBatch {
             "Group_$($role.GroupId)" 
         }
         elseif ($role.Type -in @('AzureResource','Azure')) {
-            "AzureResource_$($role.FullScope)_$($role.RoleDefinitionId)"  # Use FullScope
+            "AzureResource_$($role.RoleDefinitionId)"
         }
         else { 
             "Entra_$($role.RoleDefinitionId)" 
@@ -1085,7 +1093,7 @@ function Get-PIMRolesBatch {
             $defaultPolicy = [PSCustomObject]@{
                 MaxDuration                      = 8
                 RequiresMfa                      = $false
-                RequiresJustification            = if ($role.Type -eq 'AzureResource') { $true } else { $false }
+                RequiresJustification            = if ($role.Type -in @('AzureResource','Azure')) { $true } else { $false }
                 RequiresTicket                   = $false
                 RequiresApproval                 = $false
                 RequiresAuthenticationContext    = $false
@@ -1105,7 +1113,7 @@ function Get-PIMRolesBatch {
             "Group_$($role.GroupId)" 
         }
         elseif ($role.Type -in @('AzureResource','Azure')) {
-            "AzureResource_$($role.FullScope)_$($role.RoleDefinitionId)"  # Use FullScope
+            "AzureResource_$($role.RoleDefinitionId)"
         }
         else { 
             "Entra_$($role.RoleDefinitionId)" 

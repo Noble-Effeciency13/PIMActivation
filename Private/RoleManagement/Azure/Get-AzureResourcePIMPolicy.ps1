@@ -24,7 +24,7 @@ function Get-AzureResourcePIMPolicy {
         [Parameter(Mandatory)]
         [string]$RoleDefinitionId,
         
-        [Parameter(Mandatory)]
+        [Parameter()]
         [string]$SubscriptionId,
         
         [Parameter()]
@@ -44,9 +44,15 @@ function Get-AzureResourcePIMPolicy {
         }
         
         # Get access token for Azure Management API
-        $token = [Microsoft.Azure.Commands.Common.Authentication.AzureSession]::Instance.AuthenticationFactory.Authenticate($context.Account, $context.Environment, $context.Tenant.Id, $null, "Never", $null, "https://management.azure.com/").AccessToken
+        $tokenObj = Get-AzAccessToken -ResourceUrl 'https://management.azure.com/' -ErrorAction Stop
+        $token = if ($tokenObj.Token -is [System.Security.SecureString]) {
+            [System.Net.NetworkCredential]::new('', $tokenObj.Token).Password
+        } else { $tokenObj.Token }
         
-        # Azure Resource PIM policies are scoped to the resource scope
+        $policyApiVersion = '2020-10-01-preview'
+
+        # Azure Resource PIM policy assignments are queried in the context of a scope,
+        # but policy identity is role-based for this module's cache and UI behavior.
         $policyScope = if ($Scope) { $Scope } else { "/subscriptions/$SubscriptionId" }
 
         # Normalize role definition ID to GUID and construct correct path based on scope type
@@ -56,10 +62,15 @@ function Get-AzureResourcePIMPolicy {
         }
 
         $isManagementGroupScope = ($policyScope -match "^/providers/Microsoft\.Management/managementGroups/")
-        $roleDefPath = if ($isManagementGroupScope) {
+        # Prefer the original full ARM path from the schedule; only reconstruct when it is a bare GUID
+        $roleDefPath = if ($RoleDefinitionId -match "^/") {
+            $RoleDefinitionId
+        } elseif ($isManagementGroupScope) {
             "/providers/Microsoft.Authorization/roleDefinitions/$roleDefGuid"
-        } else {
+        } elseif ($SubscriptionId) {
             "/subscriptions/$SubscriptionId/providers/Microsoft.Authorization/roleDefinitions/$roleDefGuid"
+        } else {
+            "/providers/Microsoft.Authorization/roleDefinitions/$roleDefGuid"
         }
         
         # Call Azure REST API to get PIM role settings
@@ -67,134 +78,185 @@ function Get-AzureResourcePIMPolicy {
             'Authorization' = "Bearer $token"
             'Content-Type'  = 'application/json'
         }
-        
-        # Try to get the role setting for this specific role definition at this scope
-        $uri = "https://management.azure.com$policyScope/providers/Microsoft.Authorization/roleManagementPolicyAssignments?api-version=2020-10-01&`$filter=roleDefinitionId eq '$roleDefPath'"
 
-        $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get -ErrorAction SilentlyContinue
-        
-        if ($response -and $response.value -and $response.value.Count -gt 0) {
-            $policyAssignment = $response.value[0]
-            $policyId = $policyAssignment.properties.policyId
-            
-            # Get the actual policy definition
-            $policyUri = "https://management.azure.com$policyScope/providers/Microsoft.Authorization/roleManagementPolicies/${policyId}?api-version=2020-10-01"
-            $policyResponse = Invoke-RestMethod -Uri $policyUri -Headers $headers -Method Get -ErrorAction SilentlyContinue
-            
-            if ($policyResponse -and $policyResponse.properties) {
-                $policy = $policyResponse.properties
-                
-                # Parse the policy rules to extract relevant settings
-                $maxDuration = 8  # Default
-                $requiresMfa = $false  # Azure Resource roles typically don't require MFA activation
-                $requiresJustification = $true  # Default
-                $requiresApproval = $false
-                
-                if ($policy.rules) {
-                    foreach ($rule in $policy.rules) {
-                        switch ($rule.id) {
-                            'Activation_Admin_Duration' {
-                                if ($rule.maximumDuration) {
-                                    # Parse duration (format: PT8H for 8 hours)
-                                    if ($rule.maximumDuration -match "PT(\d+)H") {
-                                        $maxDuration = [int]$matches[1]
-                                    }
-                                }
-                            }
-                            'Activation_Admin_MFA' {
-                                $requiresMfa = $rule.setting.mfaRequired -eq $true
-                            }
-                            'Activation_Admin_Justification' {
-                                $requiresJustification = $rule.setting.justificationRequired -eq $true
-                            }
-                            'Activation_Admin_Approval' {
-                                $requiresApproval = $rule.setting.approvalRequired -eq $true
+        # Helper: build a "policy unavailable" object so callers can distinguish missing data from defaults
+        $unavailablePolicy = [PSCustomObject]@{
+            MaxDuration                      = 8
+            RequiresMfa                      = $false
+            RequiresJustification            = $true
+            RequiresTicket                   = $false
+            RequiresApproval                 = $false
+            RequiresAuthenticationContext    = $false
+            AuthenticationContextId          = $null
+            AuthenticationContextDisplayName = $null
+            AuthenticationContextDescription = $null
+            AuthenticationContextDetails     = $null
+            NotificationSettings             = $null
+            ApprovalSettings                 = $null
+            PolicyUnavailable                = $true
+        }
+
+        $policyLookupScopes = [System.Collections.ArrayList]::new()
+        $seenLookupScopes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $AddPolicyLookupScope = {
+            param([string]$CandidateScope)
+            if ($CandidateScope -and $seenLookupScopes.Add($CandidateScope)) {
+                $null = $policyLookupScopes.Add($CandidateScope)
+            }
+        }
+
+        & $AddPolicyLookupScope $policyScope
+        if ($policyScope -match '^(\/providers/Microsoft\.Management/managementGroups/[^\/]+)') {
+            & $AddPolicyLookupScope $matches[1]
+        }
+        elseif ($policyScope -match '^(\/subscriptions\/[^\/]+)') {
+            & $AddPolicyLookupScope $matches[1]
+        }
+        elseif ($SubscriptionId) {
+            & $AddPolicyLookupScope "/subscriptions/$SubscriptionId"
+        }
+
+        if ($policyLookupScopes.Count -eq 0) {
+            Write-Verbose "Get-AzureResourcePIMPolicy: no policy lookup scope available for '$roleDefGuid'; returning unavailable-policy marker."
+            return $unavailablePolicy
+        }
+
+        # Helper: extract HTTP status code from a caught Invoke-RestMethod exception
+        $GetHttpStatus = {
+            param($err)
+            try {
+                if ($err.Exception.Response) { return [int]$err.Exception.Response.StatusCode }
+            } catch {}
+            return 0
+        }
+
+        # Helper: parse policy rules into the standard policy object
+        $ParseRules = {
+            param($rules)
+            $maxDuration          = 8
+            $requiresMfa          = $false
+            $requiresJustification = $true
+            $requiresTicket        = $false
+            $requiresApproval      = $false
+            $requiresAuthenticationContext = $false
+            $authenticationContextId = $null
+            foreach ($rule in $rules) {
+                switch ($rule.id) {
+                    'Expiration_EndUser_Assignment' {
+                        if ($rule.maximumDuration) {
+                            try {
+                                $ts = [System.Xml.XmlConvert]::ToTimeSpan($rule.maximumDuration)
+                                $maxDuration = [int]$ts.TotalHours
+                            } catch {
+                                if ($rule.maximumDuration -match 'PT(\d+)H') { $maxDuration = [int]$matches[1] }
+                                elseif ($rule.maximumDuration -match 'PT(\d+)M') { $maxDuration = [Math]::Max(1, [int]([int]$matches[1] / 60)) }
                             }
                         }
                     }
-                }
-                
-                Write-Verbose "Retrieved Azure Resource PIM policy: MaxDuration=$maxDuration, MFA=$requiresMfa, Justification=$requiresJustification, Approval=$requiresApproval"
-                
-                return [PSCustomObject]@{
-                    MaxDuration                      = $maxDuration
-                    RequiresMfa                      = $requiresMfa
-                    RequiresJustification            = $requiresJustification
-                    RequiresTicket                   = $false  # Azure Resource roles don't typically use tickets
-                    RequiresApproval                 = $requiresApproval
-                    RequiresAuthenticationContext    = $false  # Not used for Azure Resource roles
-                    AuthenticationContextId          = $null
-                    AuthenticationContextDisplayName = $null
-                    AuthenticationContextDescription = $null
-                    AuthenticationContextDetails     = $null
-                    NotificationSettings             = $policy.notificationSettings
-                    ApprovalSettings                 = if ($requiresApproval) { $policy.approvalSettings } else { $null }
+                    'Enablement_EndUser_Assignment' {
+                        if ($rule.enabledRules) {
+                            $enabledArr = @($rule.enabledRules)
+                            $requiresJustification = 'Justification' -in $enabledArr
+                            $requiresMfa           = 'MultiFactorAuthentication' -in $enabledArr
+                            $requiresTicket        = 'Ticketing' -in $enabledArr
+                        }
+                    }
+                    'Approval_EndUser_Assignment' {
+                        if ($rule.setting -and $null -ne $rule.setting.isApprovalRequired) {
+                            $requiresApproval = [bool]$rule.setting.isApprovalRequired
+                        }
+                    }
+                    'AuthenticationContext_EndUser_Assignment' {
+                        if ($rule.isEnabled -eq $true) {
+                            $requiresAuthenticationContext = $true
+                            if ($rule.claimValue) { $authenticationContextId = $rule.claimValue }
+                        }
+                    }
                 }
             }
+            return [PSCustomObject]@{
+                MaxDuration                      = $maxDuration
+                RequiresMfa                      = $requiresMfa
+                RequiresJustification            = $requiresJustification
+                RequiresTicket                   = $requiresTicket
+                RequiresApproval                 = $requiresApproval
+                RequiresAuthenticationContext    = $requiresAuthenticationContext
+                AuthenticationContextId          = $authenticationContextId
+                AuthenticationContextDisplayName = $null
+                AuthenticationContextDescription = $null
+                AuthenticationContextDetails     = $null
+                PolicyUnavailable                = $false
+            }
         }
-        
-        # Fallback: enumerate all policy assignments at scope and match locally when server-side filter fails
-        try {
-            $listUri = "https://management.azure.com$policyScope/providers/Microsoft.Authorization/roleManagementPolicyAssignments?api-version=2020-10-01"
-            $listResponse = Invoke-RestMethod -Uri $listUri -Headers $headers -Method Get -ErrorAction SilentlyContinue
-            if ($listResponse -and $listResponse.value -and $listResponse.value.Count -gt 0) {
-                $matched = $listResponse.value | Where-Object {
-                    $_.properties.roleDefinitionId -eq $roleDefPath -or
-                    ($_.properties.roleDefinitionId -match "([a-fA-F0-9\-]{36})" -and $matches[1] -eq $roleDefGuid)
+
+        $encodedRoleDefinitionId = [System.Uri]::EscapeDataString($roleDefPath)
+        $filter = "roleDefinitionId%20eq%20'$encodedRoleDefinitionId'"
+
+        foreach ($policyLookupScope in $policyLookupScopes) {
+            $nextUri = "https://management.azure.com$policyLookupScope/providers/Microsoft.Authorization/roleManagementPolicyAssignments?api-version=$policyApiVersion&`$filter=$filter"
+            $policyId = $null
+
+            while ($nextUri -and -not $policyId) {
+                $listResponse = $null
+                try {
+                    $listResponse = Invoke-RestMethod -Uri $nextUri -Headers $headers -Method Get -ErrorAction Stop
+                } catch {
+                    $httpStatus = & $GetHttpStatus $_
+                    if ($httpStatus -in @(401, 403)) {
+                        Write-Verbose "Get-AzureResourcePIMPolicy: HTTP $httpStatus at '$policyLookupScope' - Microsoft.Authorization/roleManagementPolicies/read required (Reader role). Returning unavailable policy."
+                        return $unavailablePolicy
+                    }
+                    Write-Verbose "Get-AzureResourcePIMPolicy: policy assignment list failed at '$policyLookupScope' (HTTP $httpStatus): $($_.Exception.Message)"
+                    break
+                }
+
+                $matched = @($listResponse.value) | Where-Object {
+                    $rdId = $_.properties.roleDefinitionId
+                    ($rdId -eq $roleDefPath) -or
+                    ($rdId -match '/roleDefinitions/([a-fA-F0-9\-]{36})$' -and $matches[1] -eq $roleDefGuid) -or
+                    ($rdId -eq $roleDefGuid)
                 } | Select-Object -First 1
 
                 if ($matched) {
                     $policyId = $matched.properties.policyId
-                    $policyUri = "https://management.azure.com$policyScope/providers/Microsoft.Authorization/roleManagementPolicies/${policyId}?api-version=2020-10-01"
-                    $policyResponse = Invoke-RestMethod -Uri $policyUri -Headers $headers -Method Get -ErrorAction SilentlyContinue
-                    if ($policyResponse -and $policyResponse.properties) {
-                        $policy = $policyResponse.properties
-
-                        # Parse the policy rules to extract relevant settings
-                        $maxDuration = 8  # Default
-                        $requiresMfa = $false
-                        $requiresJustification = $true
-                        $requiresApproval = $false
-
-                        if ($policy.rules) {
-                            foreach ($rule in $policy.rules) {
-                                switch ($rule.id) {
-                                    'Activation_Admin_Duration' {
-                                        if ($rule.maximumDuration -and ($rule.maximumDuration -match "PT(\d+)H")) { $maxDuration = [int]$matches[1] }
-                                    }
-                                    'Activation_Admin_MFA' { $requiresMfa = $rule.setting.mfaRequired -eq $true }
-                                    'Activation_Admin_Justification' { $requiresJustification = $rule.setting.justificationRequired -eq $true }
-                                    'Activation_Admin_Approval' { $requiresApproval = $rule.setting.approvalRequired -eq $true }
-                                }
-                            }
-                        }
-
-                        Write-Verbose "Retrieved Azure Resource PIM policy via fallback: MaxDuration=$maxDuration, MFA=$requiresMfa, Justification=$requiresJustification, Approval=$requiresApproval"
-
-                        return [PSCustomObject]@{
-                            MaxDuration                      = $maxDuration
-                            RequiresMfa                      = $requiresMfa
-                            RequiresJustification            = $requiresJustification
-                            RequiresTicket                   = $false
-                            RequiresApproval                 = $requiresApproval
-                            RequiresAuthenticationContext    = $false
-                            AuthenticationContextId          = $null
-                            AuthenticationContextDisplayName = $null
-                            AuthenticationContextDescription = $null
-                            AuthenticationContextDetails     = $null
-                            NotificationSettings             = $policy.notificationSettings
-                            ApprovalSettings                 = if ($requiresApproval) { $policy.approvalSettings } else { $null }
-                        }
-                    }
+                } else {
+                    $nextUri = if ($listResponse.nextLink) { $listResponse.nextLink } else { $null }
                 }
             }
-        } catch { Write-Verbose "Fallback Azure Resource PIM policy enumeration failed: $($_.Exception.Message)" }
 
-        Write-Verbose "Could not retrieve Azure Resource PIM policy; returning null to use defaults upstream"
-        return $null
+            if (-not $policyId) {
+                Write-Verbose "Get-AzureResourcePIMPolicy: no policy assignment matched '$roleDefGuid' at '$policyLookupScope'"
+                continue
+            }
+
+            # policyId may be a full ARM path (/subscriptions/.../roleManagementPolicies/{name})
+            # or just the policy name. Handle both.
+            $policyUri = if ($policyId -match '^/') {
+                "https://management.azure.com${policyId}?api-version=$policyApiVersion"
+            } else {
+                "https://management.azure.com$policyLookupScope/providers/Microsoft.Authorization/roleManagementPolicies/${policyId}?api-version=$policyApiVersion"
+            }
+
+            $policyResponse = $null
+            try {
+                $policyResponse = Invoke-RestMethod -Uri $policyUri -Headers $headers -Method Get -ErrorAction Stop
+            } catch {
+                $httpStatus = & $GetHttpStatus $_
+                Write-Verbose "Get-AzureResourcePIMPolicy: policy fetch failed at '$policyLookupScope' (HTTP $httpStatus): $($_.Exception.Message)"
+                continue
+            }
+
+            if ($policyResponse -and $policyResponse.properties -and $policyResponse.properties.rules) {
+                Write-Verbose "Get-AzureResourcePIMPolicy: successfully parsed policy for '$roleDefGuid' at '$policyLookupScope'"
+                return & $ParseRules -rules $policyResponse.properties.rules
+            }
+        }
+
+        Write-Verbose "Get-AzureResourcePIMPolicy: could not retrieve policy for '$roleDefGuid' at scopes '$($policyLookupScopes -join ', ')'; returning unavailable-policy marker."
+        return $unavailablePolicy
     }
     catch {
         Write-Verbose "Failed to retrieve Azure Resource PIM policy: $($_.Exception.Message)"
-        return $null
+        return $unavailablePolicy
     }
 }

@@ -47,19 +47,18 @@ function Get-PIMRolePolicy {
         $script:PolicyCache = @{}
         Write-Verbose "Initialized policy cache"
     }
+
+    $policyRoleType = if ($Role.Type -eq 'Azure') { 'AzureResource' } else { $Role.Type }
     
     # Create cache key based on role type and ID
-    switch ($Role.Type) {
+    switch ($policyRoleType) {
         'Group'       { $cacheKey = "Group_$($Role.ResourceId)" }
         'Entra'       { $cacheKey = "Entra_$($Role.Id)" }
         'AzureResource' {
-            # Avoid missing properties; prefer Scope or ResourceName
-            $stableKey = $null
-            if ($Role.PSObject.Properties['Scope'] -and $Role.Scope) { $stableKey = $Role.Scope }
-            elseif ($Role.PSObject.Properties['ResourceName'] -and $Role.ResourceName) { $stableKey = $Role.ResourceName }
-            elseif ($Role.PSObject.Properties['DirectoryScopeId'] -and $Role.DirectoryScopeId) { $stableKey = $Role.DirectoryScopeId }
-            else { $stableKey = 'unknown' }
-            $cacheKey = "AzureResource_$stableKey"
+            $rd = if ($Role.PSObject.Properties['RoleDefinitionId'] -and $Role.RoleDefinitionId) { $Role.RoleDefinitionId }
+                  elseif ($Role.PSObject.Properties['Id'] -and $Role.Id) { $Role.Id }
+                  else { $null }
+            $cacheKey = if ($rd) { "AzureResource_$rd" } else { 'AzureResource_unknown' }
         }
         default       { $cacheKey = "$($Role.Type)_$($Role.Id ?? 'unknown')" }
     }
@@ -70,7 +69,7 @@ function Get-PIMRolePolicy {
         return $script:PolicyCache[$cacheKey]
     }
     
-    Write-Verbose "Retrieving policy for role: $($Role.Name) [Type: $($Role.Type)]"
+    Write-Verbose "Retrieving policy for role: $($Role.Name) [Type: $policyRoleType]"
     
     # Initialize policy object with default values
     $policyInfo = [PSCustomObject]@{
@@ -106,7 +105,7 @@ function Get-PIMRolePolicy {
     }
     
     try {
-        switch ($Role.Type) {
+        switch ($policyRoleType) {
             'Entra' {
                 Write-Verbose "Processing Entra ID role policy [RoleId: $($Role.Id)]"
                 try {
@@ -265,7 +264,24 @@ function Get-PIMRolePolicy {
             }
             
             'AzureResource' {
-                Write-Verbose "Using default policy for Azure Resource role"
+                $subId     = if ($Role.PSObject.Properties['SubscriptionId']) { $Role.SubscriptionId } else { $null }
+                $fullScope = if ($Role.PSObject.Properties['FullScope'] -and $Role.FullScope) { $Role.FullScope }
+                             elseif ($Role.PSObject.Properties['Scope'] -and $Role.Scope -match '^/') { $Role.Scope }
+                             else { $null }
+                $rdId      = if ($Role.PSObject.Properties['RoleDefinitionId']) { $Role.RoleDefinitionId }
+                             elseif ($Role.PSObject.Properties['Id']) { $Role.Id }
+                             else { $null }
+                if ($rdId) {
+                    try {
+                        $fetchedPolicy = Get-AzureResourcePIMPolicy -RoleDefinitionId $rdId -SubscriptionId $subId -Scope $fullScope
+                        if ($fetchedPolicy) {
+                            $script:PolicyCache[$cacheKey] = $fetchedPolicy
+                            return $fetchedPolicy
+                        }
+                    } catch {
+                        Write-Verbose "Failed to fetch Azure Resource PIM policy: $($_.Exception.Message)"
+                    }
+                }
                 $policyInfo.RequiresJustification = $true
             }
         }

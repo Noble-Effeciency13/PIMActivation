@@ -12,7 +12,7 @@ function Test-AuthenticationContextToken {
         The JWT access token to validate.
     
     .PARAMETER ExpectedContextId
-        The expected authentication context ID (e.g., "c3") that should be present in the token.
+        One or more authentication context IDs (e.g., "c3") that should be present in the token.
     
     .EXAMPLE
         $isValid = Test-AuthenticationContextToken -AccessToken $token -ExpectedContextId "c3"
@@ -33,7 +33,7 @@ function Test-AuthenticationContextToken {
         [string]$AccessToken,
         
         [Parameter(Mandatory)]
-        [string]$ExpectedContextId
+        [string[]]$ExpectedContextId
     )
     
     try {
@@ -63,15 +63,18 @@ function Test-AuthenticationContextToken {
         
         # Check for authentication context claim (acrs)
         if ($tokenData.acrs) {
-            $authContextValue = $tokenData.acrs
-            Write-Verbose "Found authentication context claim: $authContextValue"
+            $authContextValues = @($tokenData.acrs)
+            $authContextLabel = $authContextValues -join ', '
+            $expectedContextIds = @($ExpectedContextId | Where-Object { $_ })
+            Write-Verbose "Found authentication context claim: $authContextLabel"
             
-            if ($authContextValue -eq $ExpectedContextId) {
-                Write-Verbose "Authentication context token validation successful - contains expected context: $ExpectedContextId"
+            $missingContextIds = @($expectedContextIds | Where-Object { $_ -notin $authContextValues })
+            if ($missingContextIds.Count -eq 0) {
+                Write-Verbose "Authentication context token validation successful - contains expected context(s): $($expectedContextIds -join ', ')"
                 return $true
             }
             else {
-                Write-Verbose "Authentication context mismatch - expected: $ExpectedContextId, found: $authContextValue"
+                Write-Verbose "Authentication context mismatch - missing: $($missingContextIds -join ', '), found: $authContextLabel"
                 return $false
             }
         }

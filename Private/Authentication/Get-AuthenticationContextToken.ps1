@@ -10,15 +10,43 @@ function Get-AuthenticationContextToken {
     
     .PARAMETER ContextId
         The authentication context ID (e.g., "c3") required by the role policy.
+
+    .PARAMETER ContextIds
+        One or more authentication context IDs required by the selected role policies.
+
+    .PARAMETER Scopes
+        Resource scopes for the access token. Defaults to Microsoft Graph.
     #>
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'Single')]
     param(
-        [Parameter(Mandatory)]
-        [string]$ContextId
+        [Parameter(Mandatory, ParameterSetName = 'Single')]
+        [string]$ContextId,
+
+        [Parameter(Mandatory, ParameterSetName = 'Multiple')]
+        [string[]]$ContextIds,
+
+        [Parameter()]
+        [string[]]$Scopes = @("https://graph.microsoft.com/.default"),
+
+        [Parameter()]
+        [string]$CacheNamespace = 'Graph'
     )
     
     try {
-        Write-Verbose "=== Starting authentication context token acquisition for context: $ContextId ==="
+        $requestedContextIds = if ($PSCmdlet.ParameterSetName -eq 'Multiple') { @($ContextIds) } else { @($ContextId) }
+        $requestedContextIds = @($requestedContextIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+
+        if ($requestedContextIds.Count -eq 0) {
+            throw "At least one authentication context ID must be specified."
+        }
+
+        $contextLabel = $requestedContextIds -join ', '
+        $cacheContextKey = $requestedContextIds -join '+'
+        $cacheScopeKey = @($Scopes | Where-Object { $_ }) -join '+'
+        $cacheKey = "$CacheNamespace|$cacheScopeKey|$cacheContextKey"
+        $ContextId = $requestedContextIds[0]
+
+        Write-Verbose "=== Starting authentication context token acquisition for context(s): $contextLabel ==="
         
         # Initialize the AuthContextTokens hashtable if it doesn't exist
         if (-not $script:AuthContextTokens) {
@@ -26,19 +54,30 @@ function Get-AuthenticationContextToken {
             Write-Verbose "Initialized AuthContextTokens cache"
         }
         
-        # Check if we already have a valid token for this context
-        if ($script:AuthContextTokens.ContainsKey($ContextId)) {
-            $cachedToken = $script:AuthContextTokens[$ContextId]
+        # Check if we already have a valid token for this context/resource combination
+        if ($script:AuthContextTokens.ContainsKey($cacheKey)) {
+            $cachedToken = $script:AuthContextTokens[$cacheKey]
             
             # Validate token is still fresh (less than 30 minutes old)
             if ($cachedToken.ExpiryTime -and (Get-Date) -lt $cachedToken.ExpiryTime) {
-                Write-Verbose "Using cached authentication context token for context: $ContextId (expires: $($cachedToken.ExpiryTime))"
+                Write-Verbose "Using cached authentication context token for context(s): $contextLabel (expires: $($cachedToken.ExpiryTime))"
                 return $cachedToken.AccessToken
             }
             else {
-                Write-Verbose "Cached token for context $ContextId has expired, obtaining fresh token"
-                $script:AuthContextTokens.Remove($ContextId)
+                Write-Verbose "Cached token for context(s) $contextLabel has expired, obtaining fresh token"
+                $script:AuthContextTokens.Remove($cacheKey)
             }
+        }
+        elseif ($requestedContextIds.Count -eq 1 -and $script:AuthContextTokens.ContainsKey($ContextId)) {
+            $cachedToken = $script:AuthContextTokens[$ContextId]
+
+            if ($cachedToken.ExpiryTime -and (Get-Date) -lt $cachedToken.ExpiryTime) {
+                Write-Verbose "Using legacy cached authentication context token for context: $ContextId (expires: $($cachedToken.ExpiryTime))"
+                return $cachedToken.AccessToken
+            }
+
+            Write-Verbose "Legacy cached token for context $ContextId has expired, obtaining fresh token"
+            $script:AuthContextTokens.Remove($ContextId)
         }
         
         # Get current Graph context for tenant ID
@@ -51,15 +90,31 @@ function Get-AuthenticationContextToken {
         
         Write-Verbose "Current tenant ID: $tenantId"
         Write-Verbose "PowerShell version: $($PSVersionTable.PSVersion)"
-        Write-Verbose "Obtaining fresh authentication context token for context: $ContextId"
+        Write-Verbose "Obtaining fresh authentication context token for context(s): $contextLabel"
         
         # Ensure we're running PowerShell Core
         if ($PSEdition -ne "Core") {
             throw "WAM authentication requires PowerShell Core (PowerShell 7+)"
         }
         
-        # Build the claims challenge format
-        $claimsJson = '{"access_token":{"acrs":{"essential":true,"value":"' + $ContextId + '"}}}'
+        # Build the claims challenge format. A single context uses the documented
+        # `value` form; multiple selected contexts use the multi-value form.
+        $claimsPayload = @{
+            access_token = @{
+                acrs = @{
+                    essential = $true
+                }
+            }
+        }
+
+        if ($requestedContextIds.Count -eq 1) {
+            $claimsPayload['access_token']['acrs']['value'] = $requestedContextIds[0]
+        }
+        else {
+            $claimsPayload['access_token']['acrs']['values'] = @($requestedContextIds)
+        }
+
+        $claimsJson = $claimsPayload | ConvertTo-Json -Depth 6 -Compress
         Write-Verbose "Claims challenge: $claimsJson"
         
         Write-Verbose "=== Starting WAM authentication setup ==="
@@ -451,7 +506,10 @@ public class PIMAuthContextHelper
         if ([string]::IsNullOrWhiteSpace($tenantId)) { throw "Tenant ID could not be determined and is null or empty" }
 
         $redirectUri = "http://localhost"
-        $scopes = @("https://graph.microsoft.com/.default")
+        $scopes = @($Scopes | Where-Object { $_ })
+        if ($scopes.Count -eq 0) {
+            throw "At least one token scope must be specified."
+        }
 
         Write-Verbose "=== Attempting WAM authentication with claims ==="
         Write-Verbose "Client ID: $clientId"
@@ -510,24 +568,32 @@ public class PIMAuthContextHelper
         $expiryTime = (Get-Date).AddMinutes(45)
         
         # Validate that the token contains the expected authentication context claim
-        $isValidToken = Test-AuthenticationContextToken -AccessToken $accessToken -ExpectedContextId $ContextId
+        $isValidToken = Test-AuthenticationContextToken -AccessToken $accessToken -ExpectedContextId $requestedContextIds
         if (-not $isValidToken) {
-            Write-Warning "Authentication context token validation failed - token does not contain expected context claim: $ContextId"
+            Write-Warning "Authentication context token validation failed - token does not contain all expected context claims: $contextLabel"
             Write-Verbose "Token might still be valid - continuing anyway"
         }
         
-        $script:AuthContextTokens[$ContextId] = @{
+        $cacheEntry = @{
             AccessToken = $accessToken
             ExpiryTime  = $expiryTime
-            ContextId   = $ContextId
+            ContextIds  = @($requestedContextIds)
+            Scopes      = @($scopes)
+            CacheKey    = $cacheKey
+        }
+
+        $script:AuthContextTokens[$cacheKey] = $cacheEntry
+        if ($requestedContextIds.Count -eq 1 -and $CacheNamespace -eq 'Graph') {
+            $script:AuthContextTokens[$ContextId] = $cacheEntry
         }
         
-        Write-Verbose "Cached authentication context token for context: $ContextId (expires: $expiryTime)"
+        Write-Verbose "Cached authentication context token for context(s): $contextLabel (expires: $expiryTime)"
         Write-Verbose "=== Authentication context token acquisition completed successfully ==="
         return $accessToken
     }
     catch {
-        $errorMessage = "Failed to obtain authentication context token for context $ContextId`: $($_.Exception.Message)"
+        $errorContextLabel = if ($contextLabel) { $contextLabel } elseif ($ContextId) { $ContextId } else { 'unknown' }
+        $errorMessage = "Failed to obtain authentication context token for context(s) $errorContextLabel`: $($_.Exception.Message)"
         Write-Warning $errorMessage
         Write-Verbose "Exception details:"
         Write-Verbose "  Type: $($_.Exception.GetType().FullName)"

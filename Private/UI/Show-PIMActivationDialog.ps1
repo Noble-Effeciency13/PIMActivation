@@ -15,6 +15,9 @@ function Show-PIMActivationDialog {
     
     .PARAMETER OptionalJustification
         Displays justification field as optional with recommended usage note.
+
+    .PARAMETER ShowAzureReducedScope
+        Displays an optional Azure reduced-scope field for Azure Resource role activations.
     
     .EXAMPLE
         Show-PIMActivationDialog -RequiresJustification
@@ -26,7 +29,7 @@ function Show-PIMActivationDialog {
     
     .OUTPUTS
         PSCustomObject
-        Returns object with Justification, TicketNumber, and Cancelled properties.
+        Returns object with Justification, TicketNumber, AzureReducedScope, and Cancelled properties.
     
     .NOTES
         Requires System.Windows.Forms assembly for GUI display.
@@ -35,7 +38,8 @@ function Show-PIMActivationDialog {
     param(
         [switch]$RequiresJustification,
         [switch]$RequiresTicket,
-        [switch]$OptionalJustification
+        [switch]$OptionalJustification,
+        [switch]$ShowAzureReducedScope
     )
     
     # Initialize result object
@@ -43,6 +47,7 @@ function Show-PIMActivationDialog {
         Justification = ""
         TicketNumber  = ""
         TicketSystem  = "ServiceNow"
+        AzureReducedScope = ""
         Cancelled     = $true
     }
     
@@ -60,6 +65,10 @@ function Show-PIMActivationDialog {
     }
     
     $y = 10
+    $justificationControl = $null
+    $txtTicket = $null
+    $cmbTicketSystem = $null
+    $reducedScopeControl = $null
     
     # Add justification field if required or optional
     if ($RequiresJustification -or $OptionalJustification) {
@@ -144,6 +153,38 @@ function Show-PIMActivationDialog {
         
         $y += 35
     }
+
+    if ($ShowAzureReducedScope) {
+        $lblReducedScope = New-Object System.Windows.Forms.Label -Property @{
+            Text     = "Reduced Scope"
+            Location = [System.Drawing.Point]::new(10, $y)
+            Size     = [System.Drawing.Size]::new(120, 23)
+            Font     = [System.Drawing.Font]::new("Segoe UI", 9)
+        }
+        $form.Controls.Add($lblReducedScope)
+
+        $txtReducedScope = New-Object System.Windows.Forms.TextBox -Property @{
+            Name     = "txtAzureReducedScope"
+            Location = [System.Drawing.Point]::new(130, $y)
+            Size     = [System.Drawing.Size]::new(280, 23)
+            Font     = [System.Drawing.Font]::new("Segoe UI", 9)
+        }
+        $form.Controls.Add($txtReducedScope)
+        $reducedScopeControl = $txtReducedScope
+
+        $y += 28
+
+        $lblReducedScopeNote = New-Object System.Windows.Forms.Label -Property @{
+            Text      = "Example: /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}. Leave empty to use the role's default scope."
+            Location  = [System.Drawing.Point]::new(130, $y)
+            Size      = [System.Drawing.Size]::new(340, 34)
+            ForeColor = [System.Drawing.Color]::FromArgb(96, 94, 92)
+            Font      = [System.Drawing.Font]::new("Segoe UI", 8)
+        }
+        $form.Controls.Add($lblReducedScopeNote)
+
+        $y += 42
+    }
     
     # Add optional justification note
     if ($OptionalJustification -and -not $RequiresJustification) {
@@ -158,17 +199,23 @@ function Show-PIMActivationDialog {
         $form.Controls.Add($lblNote)
     }
     
+    $form.ClientSize = [System.Drawing.Size]::new(484, [Math]::Max(311, $y + 75))
+    $buttonY = $form.ClientSize.Height - 45
+    $cancelButtonX = $form.ClientSize.Width - 95
+    $okButtonX = $cancelButtonX - 100
+
     # Create OK button with styling and validation
     $okButton = New-Object System.Windows.Forms.Button -Property @{
         Text         = "OK"
-        DialogResult = [System.Windows.Forms.DialogResult]::OK
-        Location     = [System.Drawing.Point]::new(290, ($y + 20))
+        DialogResult = [System.Windows.Forms.DialogResult]::None
+        Location     = [System.Drawing.Point]::new($okButtonX, $buttonY)
         Size         = [System.Drawing.Size]::new(80, 30)
         BackColor    = [System.Drawing.Color]::FromArgb(0, 103, 184)
         ForeColor    = [System.Drawing.Color]::White
         FlatStyle    = [System.Windows.Forms.FlatStyle]::Flat
         Font         = [System.Drawing.Font]::new("Segoe UI", 9)
         Cursor       = [System.Windows.Forms.Cursors]::Hand
+        Anchor       = ([System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right)
     }
     $okButton.FlatAppearance.BorderSize = 0
     
@@ -193,13 +240,11 @@ function Show-PIMActivationDialog {
             # Validate justification if required
             if ($RequiresJustification -and $justificationControl -and [string]::IsNullOrWhiteSpace($justificationControl.Text)) {
                 Show-TopMostMessageBox -Message "Justification is required for these roles." -Title "Validation Error" -Icon Warning
-                $_.Cancel = $true
                 return
             }
         
             if ($RequiresTicket -and $txtTicket -and [string]::IsNullOrWhiteSpace($txtTicket.Text)) {
                 Show-TopMostMessageBox -Message "Ticket number is required for these roles." -Title "Validation Error" -Icon Warning
-                $_.Cancel = $true
                 return
             }
         
@@ -213,6 +258,10 @@ function Show-PIMActivationDialog {
                 
                     # Save ticket system preference
                     Save-TicketSystemPreference -System $result.TicketSystem
+                }
+
+                if ($ShowAzureReducedScope -and $reducedScopeControl) {
+                    $result.AzureReducedScope = $reducedScopeControl.Text.Trim()
                 }
             
                 $result.Cancelled = $false
@@ -228,13 +277,14 @@ function Show-PIMActivationDialog {
     $cancelButton = New-Object System.Windows.Forms.Button -Property @{
         Text         = "Cancel"
         DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-        Location     = [System.Drawing.Point]::new(390, ($y + 20))
+        Location     = [System.Drawing.Point]::new($cancelButtonX, $buttonY)
         Size         = [System.Drawing.Size]::new(80, 30)
         BackColor    = [System.Drawing.Color]::White
         ForeColor    = [System.Drawing.Color]::FromArgb(32, 31, 30)
         FlatStyle    = [System.Windows.Forms.FlatStyle]::Flat
         Font         = [System.Drawing.Font]::new("Segoe UI", 9)
         Cursor       = [System.Windows.Forms.Cursors]::Hand
+        Anchor       = ([System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right)
     }
     $cancelButton.FlatAppearance.BorderSize = 1
     $cancelButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(200, 198, 196)
@@ -265,6 +315,10 @@ function Show-PIMActivationDialog {
         
         if ($RequiresTicket -and $txtTicket -and -not [string]::IsNullOrWhiteSpace($txtTicket.Text)) {
             $result.TicketNumber = $txtTicket.Text
+        }
+
+        if ($ShowAzureReducedScope -and $reducedScopeControl) {
+            $result.AzureReducedScope = $reducedScopeControl.Text.Trim()
         }
     }
     else {

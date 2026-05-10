@@ -167,7 +167,7 @@ function Initialize-PIMForm {
         
         $controlPanel = New-Object System.Windows.Forms.Panel -Property @{
             Name        = 'pnlControls'
-            Height      = 120
+            Height      = 160
             Dock        = [System.Windows.Forms.DockStyle]::Bottom
             BackColor   = [System.Drawing.Color]::White
             BorderStyle = [System.Windows.Forms.BorderStyle]::None
@@ -260,6 +260,66 @@ function Initialize-PIMForm {
         $btnRefresh.FlatAppearance.BorderSize = 1
         $btnRefresh.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(200, 198, 196)
         $controlPanel.Controls.Add($btnRefresh)
+
+        # Full Refresh button – clears all caches and re-fetches everything including policies
+        $btnFullRefresh = New-Object System.Windows.Forms.Button -Property @{
+            Name      = 'btnFullRefresh'
+            Text      = '↻ Full Refresh'
+            Location  = [System.Drawing.Point]::new(460, 40)
+            Size      = [System.Drawing.Size]::new(130, 35)
+            BackColor = [System.Drawing.Color]::White
+            ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+            FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+            Font      = [System.Drawing.Font]::new("Segoe UI", 10)
+            Cursor    = [System.Windows.Forms.Cursors]::Hand
+            Visible   = $true
+        }
+        $btnFullRefresh.FlatAppearance.BorderSize = 1
+        $btnFullRefresh.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+        $controlPanel.Controls.Add($btnFullRefresh)
+
+        # ── Role type toggle row (right side, second row under De-/Activate buttons) ─
+        $lblRoleTypes = New-Object System.Windows.Forms.Label -Property @{
+            Text      = 'Include:'
+            Location  = [System.Drawing.Point]::new(754, 88)
+            AutoSize  = $true
+            Font      = [System.Drawing.Font]::new('Segoe UI', 9)
+            ForeColor = [System.Drawing.Color]::FromArgb(32, 31, 30)
+        }
+        $controlPanel.Controls.Add($lblRoleTypes)
+
+        $chkEntra = New-Object System.Windows.Forms.CheckBox -Property @{
+            Name      = 'chkIncludeEntra'
+            Text      = 'Entra Roles'
+            Location  = [System.Drawing.Point]::new(819, 84)
+            AutoSize  = $true
+            Font      = [System.Drawing.Font]::new('Segoe UI', 9)
+            Checked   = $script:IncludeEntraRoles
+            Cursor    = [System.Windows.Forms.Cursors]::Hand
+        }
+        $controlPanel.Controls.Add($chkEntra)
+
+        $chkGroups = New-Object System.Windows.Forms.CheckBox -Property @{
+            Name      = 'chkIncludeGroups'
+            Text      = 'Groups'
+            Location  = [System.Drawing.Point]::new(934, 84)
+            AutoSize  = $true
+            Font      = [System.Drawing.Font]::new('Segoe UI', 9)
+            Checked   = $script:IncludeGroups
+            Cursor    = [System.Windows.Forms.Cursors]::Hand
+        }
+        $controlPanel.Controls.Add($chkGroups)
+
+        $chkAzure = New-Object System.Windows.Forms.CheckBox -Property @{
+            Name      = 'chkIncludeAzure'
+            Text      = 'Azure Resources'
+            Location  = [System.Drawing.Point]::new(1019, 84)
+            AutoSize  = $true
+            Font      = [System.Drawing.Font]::new('Segoe UI', 9)
+            Checked   = $script:IncludeAzureResources
+            Cursor    = [System.Windows.Forms.Cursors]::Hand
+        }
+        $controlPanel.Controls.Add($chkAzure)
         
         $btnDeactivate = New-Object System.Windows.Forms.Button -Property @{
             Name      = 'btnDeactivate'
@@ -292,6 +352,14 @@ function Initialize-PIMForm {
         }
         $btnActivate.FlatAppearance.BorderSize = 0
         $controlPanel.Controls.Add($btnActivate)
+
+        $toggleGap = 12
+    $toggleTextRightPadding = 6
+    $toggleRight = $btnActivate.Location.X + $btnActivate.Width + $toggleTextRightPadding
+        $chkAzure.Location = [System.Drawing.Point]::new($toggleRight - $chkAzure.Width, 84)
+        $chkGroups.Location = [System.Drawing.Point]::new($chkAzure.Location.X - $toggleGap - $chkGroups.Width, 84)
+        $chkEntra.Location = [System.Drawing.Point]::new($chkGroups.Location.X - $toggleGap - $chkEntra.Width, 84)
+        $lblRoleTypes.Location = [System.Drawing.Point]::new($chkEntra.Location.X - $toggleGap - $lblRoleTypes.Width, 88)
         
         # Add button hover effects
         $btnActivate.Add_MouseEnter({ $this.BackColor = [System.Drawing.Color]::FromArgb(0, 90, 158) })
@@ -302,6 +370,15 @@ function Initialize-PIMForm {
         
         $btnRefresh.Add_MouseEnter({ $this.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245) })
         $btnRefresh.Add_MouseLeave({ $this.BackColor = [System.Drawing.Color]::White })
+
+        $btnFullRefresh.Add_MouseEnter({
+            $this.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+            $this.ForeColor = [System.Drawing.Color]::White
+        })
+        $btnFullRefresh.Add_MouseLeave({
+            $this.BackColor = [System.Drawing.Color]::White
+            $this.ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+        })
 
         # ===== SPLIT CONTAINER FOR ROLE PANELS =====
         # Create resizable split view for active and eligible roles
@@ -320,7 +397,7 @@ function Initialize-PIMForm {
         
         # Position with padding between header and control panel
         $splitContainer.Location = [System.Drawing.Point]::new(15, 70)
-        $splitContainer.Size = [System.Drawing.Size]::new(1170, 710)
+        $splitContainer.Size = [System.Drawing.Size]::new(1170, 670)
         $splitContainer.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor 
         [System.Windows.Forms.AnchorStyles]::Bottom -bor 
         [System.Windows.Forms.AnchorStyles]::Left -bor 
@@ -343,7 +420,7 @@ function Initialize-PIMForm {
         $controlPanel.Visible = $true
         $controlPanel.BringToFront()
         $form.PerformLayout()
-        
+
         # ===== EVENT HANDLERS =====
         
         # Form Load - ensure proper control positioning
@@ -378,11 +455,26 @@ function Initialize-PIMForm {
                     if ($btnActivate) {
                         $btnActivate.Location = [System.Drawing.Point]::new($this.ClientSize.Width - 175, 40)
                     }
+
+                    # Position role-type toggles: second row, right-aligned under De-/Activate buttons
+                    $chkAzCtrl  = $controlPanel.Controls | Where-Object { $_.Name -eq 'chkIncludeAzure' }  | Select-Object -First 1
+                    $chkGrpCtrl = $controlPanel.Controls | Where-Object { $_.Name -eq 'chkIncludeGroups' } | Select-Object -First 1
+                    $chkEntCtrl = $controlPanel.Controls | Where-Object { $_.Name -eq 'chkIncludeEntra' }  | Select-Object -First 1
+                    $lblIncCtrl = $controlPanel.Controls | Where-Object { $_.Text -eq 'Include:' }          | Select-Object -First 1
+                    if ($btnActivate -and $chkAzCtrl -and $chkGrpCtrl -and $chkEntCtrl -and $lblIncCtrl) {
+                        $toggleGap = 12
+                        $toggleTextRightPadding = 6
+                        $toggleRight = $btnActivate.Location.X + $btnActivate.Width + $toggleTextRightPadding
+                        $chkAzCtrl.Location = [System.Drawing.Point]::new($toggleRight - $chkAzCtrl.Width, 84)
+                        $chkGrpCtrl.Location = [System.Drawing.Point]::new($chkAzCtrl.Location.X - $toggleGap - $chkGrpCtrl.Width, 84)
+                        $chkEntCtrl.Location = [System.Drawing.Point]::new($chkGrpCtrl.Location.X - $toggleGap - $chkEntCtrl.Width, 84)
+                        $lblIncCtrl.Location = [System.Drawing.Point]::new($chkEntCtrl.Location.X - $toggleGap - $lblIncCtrl.Width, 88)
+                    }
                 }
             
                 # Resize split container
                 if ($splitContainer) {
-                    $splitContainer.Size = [System.Drawing.Size]::new($this.ClientSize.Width - 30, $this.ClientSize.Height - 190)
+                    $splitContainer.Size = [System.Drawing.Size]::new($this.ClientSize.Width - 30, $this.ClientSize.Height - 230)
                 }
             })
 
@@ -416,11 +508,26 @@ function Initialize-PIMForm {
                     if ($btnActivate -and -not $btnActivate.IsDisposed) {
                         $btnActivate.Location = [System.Drawing.Point]::new($this.ClientSize.Width - 175, 40)
                     }
+
+                    # Reposition role-type toggles: second row, right-aligned under De-/Activate buttons
+                    $chkAzCtrl  = $controlPanel.Controls | Where-Object { $_.Name -eq 'chkIncludeAzure' }  | Select-Object -First 1
+                    $chkGrpCtrl = $controlPanel.Controls | Where-Object { $_.Name -eq 'chkIncludeGroups' } | Select-Object -First 1
+                    $chkEntCtrl = $controlPanel.Controls | Where-Object { $_.Name -eq 'chkIncludeEntra' }  | Select-Object -First 1
+                    $lblIncCtrl = $controlPanel.Controls | Where-Object { $_.Text -eq 'Include:' }          | Select-Object -First 1
+                    if ($btnActivate -and $chkAzCtrl -and -not $chkAzCtrl.IsDisposed -and $chkGrpCtrl -and -not $chkGrpCtrl.IsDisposed -and $chkEntCtrl -and -not $chkEntCtrl.IsDisposed -and $lblIncCtrl -and -not $lblIncCtrl.IsDisposed) {
+                        $toggleGap = 12
+                        $toggleTextRightPadding = 6
+                        $toggleRight = $btnActivate.Location.X + $btnActivate.Width + $toggleTextRightPadding
+                        $chkAzCtrl.Location = [System.Drawing.Point]::new($toggleRight - $chkAzCtrl.Width, 84)
+                        $chkGrpCtrl.Location = [System.Drawing.Point]::new($chkAzCtrl.Location.X - $toggleGap - $chkGrpCtrl.Width, 84)
+                        $chkEntCtrl.Location = [System.Drawing.Point]::new($chkGrpCtrl.Location.X - $toggleGap - $chkEntCtrl.Width, 84)
+                        $lblIncCtrl.Location = [System.Drawing.Point]::new($chkEntCtrl.Location.X - $toggleGap - $lblIncCtrl.Width, 88)
+                    }
                 }
             
                 # Resize split container with padding
                 if ($splitContainer -and -not $splitContainer.IsDisposed) {
-                    $splitContainer.Size = [System.Drawing.Size]::new($this.ClientSize.Width - 30, $this.ClientSize.Height - 190)
+                    $splitContainer.Size = [System.Drawing.Size]::new($this.ClientSize.Width - 30, $this.ClientSize.Height - 230)
                 }
             })
         
@@ -453,7 +560,7 @@ function Initialize-PIMForm {
                     }
                 }
             })
-        
+
         # Activate Roles button handler
         $btnActivate.Add_Click({
                 $eligibleListView = $form.Controls.Find("lstEligible", $true)[0]
@@ -566,13 +673,110 @@ function Initialize-PIMForm {
                 }
             })
 
+        # Full Refresh button - clears all caches and re-fetches everything including policies
+        $btnFullRefresh.Add_Click({
+                Write-Verbose "Full Refresh button clicked - clearing all caches"
+                $form = $this.FindForm()
+
+                # Clear ALL caches so everything is re-fetched from scratch
+                $script:CachedEligibleRoles       = $null
+                $script:CachedActiveRoles         = $null
+                $script:LastRoleFetchTime         = $null
+                $script:PolicyCache               = @{}
+                $script:AuthenticationContextCache = @{}
+                $script:AzureRolesCache           = @()
+                $script:AzureRolesCacheTime       = $null
+                $script:DirtyAzureSubscriptions   = @()
+                $script:DirtyManagementGroups     = @()
+
+                $refreshSplash = Show-OperationSplash -Title "Full Refresh" -InitialMessage "Re-fetching all roles and policies..." -ShowProgressBar $true
+
+                try {
+                    Update-PIMRolesList -Form $form -RefreshActive -RefreshEligible -SplashForm $refreshSplash -DisableParallelProcessing:$DisableParallelProcessing -ThrottleLimit $ThrottleLimit
+                }
+                catch {
+                    Write-Error "Full refresh failed: $_"
+                    [System.Windows.Forms.MessageBox]::Show(
+                        $form,
+                        "Full refresh failed: $($_.Exception.Message)",
+                        'Refresh Error',
+                        [System.Windows.Forms.MessageBoxButtons]::OK,
+                        [System.Windows.Forms.MessageBoxIcon]::Error
+                    )
+                }
+                finally {
+                    if ($refreshSplash -and -not $refreshSplash.IsDisposed) {
+                        $refreshSplash.Close()
+                    }
+                }
+            })
+
+        # Role type toggle handlers - clear caches and trigger full refresh when changed
+        $chkEntra.Add_CheckedChanged({
+                $script:IncludeEntraRoles = $this.Checked
+                Write-Verbose "Entra Roles toggled: $($script:IncludeEntraRoles)"
+                $script:CachedEligibleRoles = $null
+                $script:CachedActiveRoles   = $null
+                $script:LastRoleFetchTime   = $null
+                $f = $this.FindForm()
+                $btn = $f.Controls[0].Controls | Where-Object { $_.Name -eq 'pnlControls' } | Select-Object -First 1 | ForEach-Object { $_.Controls | Where-Object { $_.Name -eq 'btnFullRefresh' } | Select-Object -First 1 }
+                if (-not $btn) { $btn = $f.Controls | ForEach-Object { $_.Controls } | Where-Object { $_.Name -eq 'btnFullRefresh' } | Select-Object -First 1 }
+                if ($btn) { $btn.PerformClick() }
+            })
+
+        $chkGroups.Add_CheckedChanged({
+                $script:IncludeGroups = $this.Checked
+                Write-Verbose "Groups toggled: $($script:IncludeGroups)"
+                $script:CachedEligibleRoles = $null
+                $script:CachedActiveRoles   = $null
+                $script:LastRoleFetchTime   = $null
+                $f = $this.FindForm()
+                $btn = $f.Controls | ForEach-Object { $_.Controls } | Where-Object { $_.Name -eq 'btnFullRefresh' } | Select-Object -First 1
+                if ($btn) { $btn.PerformClick() }
+            })
+
+        $chkAzure.Add_CheckedChanged({
+                if ($this.Checked) {
+                    # Validate Azure modules are available before enabling
+                    $azureReady = Initialize-AzureResourceSupport
+                    if (-not $azureReady) {
+                        # Suppress the event while reverting to avoid re-entrancy
+                        $script:_suppressAzureToggle = $true
+                        $this.Checked = $false
+                        $script:_suppressAzureToggle = $false
+                        [System.Windows.Forms.MessageBox]::Show(
+                            $this.FindForm(),
+                            "Azure Resource support is not available.`nRequired Az PowerShell modules could not be loaded.",
+                            'Azure Not Available',
+                            [System.Windows.Forms.MessageBoxButtons]::OK,
+                            [System.Windows.Forms.MessageBoxIcon]::Warning
+                        )
+                        return
+                    }
+                }
+                if ($script:_suppressAzureToggle) { return }
+                $script:IncludeAzureResources = $this.Checked
+                Write-Verbose "Azure Resources toggled: $($script:IncludeAzureResources)"
+                $script:CachedEligibleRoles   = $null
+                $script:CachedActiveRoles     = $null
+                $script:LastRoleFetchTime     = $null
+                $script:AzureRolesCache       = @()
+                $script:AzureRolesCacheTime   = $null
+                $f = $this.FindForm()
+                $btn = $f.Controls | ForEach-Object { $_.Controls } | Where-Object { $_.Name -eq 'btnFullRefresh' } | Select-Object -First 1
+                if ($btn) { $btn.PerformClick() }
+            })
+
         # Keyboard shortcuts
         $form.Add_KeyDown({
                 if ($_.Control) {
+                    $f    = $this
+                    $pnl  = $f.Controls | Where-Object { $_.Name -eq 'pnlControls' } | Select-Object -First 1
                     switch ($_.KeyCode) {
-                        'R' { $btnRefresh.PerformClick() }  # Ctrl+R: Refresh
-                        'A' { $btnActivate.PerformClick() }  # Ctrl+A: Activate
-                        'D' { $btnDeactivate.PerformClick() }  # Ctrl+D: Deactivate
+                        'R' { ($pnl.Controls | Where-Object { $_.Name -eq 'btnRefresh' }     | Select-Object -First 1)?.PerformClick() }  # Ctrl+R
+                        'F' { ($pnl.Controls | Where-Object { $_.Name -eq 'btnFullRefresh' } | Select-Object -First 1)?.PerformClick() }  # Ctrl+F
+                        'A' { ($pnl.Controls | Where-Object { $_.Name -eq 'btnActivate' }    | Select-Object -First 1)?.PerformClick() }  # Ctrl+A
+                        'D' { ($pnl.Controls | Where-Object { $_.Name -eq 'btnDeactivate' }  | Select-Object -First 1)?.PerformClick() }  # Ctrl+D
                     }
                 }
                 elseif ($_.KeyCode -eq 'Escape') {

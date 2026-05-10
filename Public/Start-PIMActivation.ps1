@@ -149,64 +149,78 @@ begin {
         throw $errorMessage
     }
 
-    try {
-        # Validate module dependencies before proceeding
-        $dependencyTest = Test-PIMDependencies
-        if (-not $dependencyTest.ReadyForActivation) {
-            Write-Error "Required module dependencies are missing or incorrect. Please resolve dependencies before proceeding." -Category InvalidOperation
-            return
-        }
+    # Only run the full dependency check/resolve when modules were not already imported
+    # at module-load time (i.e. $script:DependenciesValidated = $false means they still need installing)
+    if (-not $script:DependenciesValidated) {
+        try {
+            # Validate module dependencies before proceeding
+            $dependencyTest = Test-PIMDependencies
+            if (-not $dependencyTest.ReadyForActivation) {
+                Write-Error "Required module dependencies are missing or incorrect. Please resolve dependencies before proceeding." -Category InvalidOperation
+                return
+            }
 
-        # Check if user wants to proceed with starting the PIM activation tool
+            # Check if user wants to proceed with starting the PIM activation tool
+            if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
+                Write-Verbose "Operation cancelled by user"
+                return
+            }
+
+            # Automatic dependency resolution with minimal output
+            if (-not $ManualDependencyCheck) {
+                Write-Verbose "Performing automatic dependency resolution..."
+                $dependencyResult = Resolve-PIMDependencies -Force:$Force
+
+                if (-not $dependencyResult.Success) {
+                    Write-Error "Dependency resolution failed: $($dependencyResult.Errors -join '; ')" -Category OperationStopped
+                    return
+                }
+
+                Write-Verbose "All dependencies resolved automatically"
+            }
+            else {
+                # Manual dependency checking (minimal output mode)
+                Write-Verbose "Checking PIM dependencies manually..."
+                $dependencyCheck = Test-PIMDependencies
+
+                if (-not $dependencyCheck.ReadyForActivation) {
+                    switch ($dependencyCheck.OverallStatus) {
+                        'Version-Conflicts' {
+                            Write-Warning "Version conflicts detected. This may cause assembly loading errors."
+                            Write-Host "`nTo resolve conflicts automatically:" -ForegroundColor Yellow
+                            Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
+                            return
+                        }
+                        'Missing-Dependencies' {
+                            Write-Warning "Missing required dependencies."
+                            Write-Host "`nTo resolve dependencies automatically:" -ForegroundColor Yellow
+                            Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
+                            return
+                        }
+                        default {
+                            Write-Warning "Dependency check failed: $($dependencyCheck.OverallStatus)"
+                            return
+                        }
+                    }
+                }
+
+                Write-Verbose "Dependencies verified successfully"
+            }
+        }
+        catch {
+            Write-Error "Failed to initialize PIM Activation: $($_.Exception.Message)" -Category OperationStopped
+            throw
+        }
+    }
+    else {
+        # Modules were already imported when the PIMActivation module was loaded – no work needed
+        Write-Verbose "Module dependencies already validated at import time – skipping dependency check"
+
+        # ShouldProcess still needs to run (WhatIf / Confirm support)
         if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
             Write-Verbose "Operation cancelled by user"
             return
         }
-
-        # Automatic dependency resolution with minimal output
-        if (-not $ManualDependencyCheck) {
-            Write-Verbose "Performing automatic dependency resolution..."
-            $dependencyResult = Resolve-PIMDependencies -Force:$Force
-
-            if (-not $dependencyResult.Success) {
-                Write-Error "Dependency resolution failed: $($dependencyResult.Errors -join '; ')" -Category OperationStopped
-                return
-            }
-
-            Write-Verbose "All dependencies resolved automatically"
-        }
-        else {
-            # Manual dependency checking (minimal output mode)
-            Write-Verbose "Checking PIM dependencies manually..."
-            $dependencyCheck = Test-PIMDependencies
-
-            if (-not $dependencyCheck.ReadyForActivation) {
-                switch ($dependencyCheck.OverallStatus) {
-                    'Version-Conflicts' {
-                        Write-Warning "Version conflicts detected. This may cause assembly loading errors."
-                        Write-Host "`nTo resolve conflicts automatically:" -ForegroundColor Yellow
-                        Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
-                        return
-                    }
-                    'Missing-Dependencies' {
-                        Write-Warning "Missing required dependencies."
-                        Write-Host "`nTo resolve dependencies automatically:" -ForegroundColor Yellow
-                        Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
-                        return
-                    }
-                    default {
-                        Write-Warning "Dependency check failed: $($dependencyCheck.OverallStatus)"
-                        return
-                    }
-                }
-            }
-
-            Write-Verbose "Dependencies verified successfully"
-        }
-    }
-    catch {
-        Write-Error "Failed to initialize PIM Activation: $($_.Exception.Message)" -Category OperationStopped
-        throw
     }
 
     # Configure execution preferences
@@ -273,30 +287,56 @@ begin {
             Start-Sleep -Milliseconds 200
             
             try {
-                # Define and validate required PowerShell modules
-                Write-Verbose "Validating required PowerShell modules"
-                Update-LoadingStatus -SplashForm $splashForm -Status "Checking dependencies..." -Progress 10
-                
-                # Azure modules will be loaded automatically when IncludeAzureResources is specified
-                
-                # Install/update required modules with progress tracking
-                # Initialize PIM modules with version pinning
-                Write-Verbose "Initializing PIM modules with version pinning"
-                Update-LoadingStatus -SplashForm $splashForm -Status "Initializing PIM modules..." -Progress 30
-                
-                $moduleParams = @{
-                    Verbose = $script:UserVerbose
+                # Initialize PIM modules
+                # When DependenciesValidated = $true the Graph modules were already imported at
+                # module-load time; we only need to handle Az modules here if requested.
+                if (-not $script:DependenciesValidated) {
+                    Write-Verbose "Validating and importing required PowerShell modules"
+                    Update-LoadingStatus -SplashForm $splashForm -Status "Initializing PIM modules..." -Progress 30
+
+                    $moduleParams = @{ Verbose = $script:UserVerbose }
+                    if ($IncludeAzureResources) { $moduleParams.IncludeAzureModules = $true }
+
+                    $moduleResult = Initialize-PIMModules @moduleParams
+                    if (-not $moduleResult.Success) {
+                        throw "Module initialization failed: $($moduleResult.Error)"
+                    }
+
+                    # Import Graph modules now that they are validated
+                    foreach ($mod in @(
+                        'Microsoft.Graph.Authentication',
+                        'Microsoft.Graph.Identity.DirectoryManagement',
+                        'Microsoft.Graph.Identity.Governance',
+                        'Microsoft.Graph.Identity.SignIns',
+                        'Microsoft.Graph.Groups',
+                        'Microsoft.Graph.Users'
+                    )) {
+                        $null = Import-PIMModule -ModuleName $mod
+                    }
+
+                    if ($IncludeAzureResources) {
+                        $null = Import-PIMModule -ModuleName 'Az.Accounts'
+                        $null = Import-PIMModule -ModuleName 'Az.Resources'
+                    }
+
+                    $script:DependenciesValidated = $true
                 }
-                
-                # Include Azure modules if Azure resources are requested
-                if ($IncludeAzureResources) {
-                    $moduleParams.IncludeAzureModules = $true
+                elseif ($IncludeAzureResources) {
+                    # Graph modules already in-session; only load the optional Az modules
+                    Write-Verbose "Loading Azure PowerShell modules"
+                    Update-LoadingStatus -SplashForm $splashForm -Status "Loading Azure modules..." -Progress 30
+
+                    $azResult = Initialize-PIMModules -IncludeAzureModules
+                    if (-not $azResult.Success) {
+                        throw "Azure module initialization failed: $($azResult.Error)"
+                    }
+                    $null = Import-PIMModule -ModuleName 'Az.Accounts'
+                    $null = Import-PIMModule -ModuleName 'Az.Resources'
                 }
-                
-                $moduleResult = Initialize-PIMModules @moduleParams
-                
-                if (-not $moduleResult.Success) {
-                    throw "Module initialization failed: $($moduleResult.Error)"
+                else {
+                    # All required modules already loaded at Import-Module time
+                    Write-Verbose "Graph modules pre-loaded – skipping module initialization"
+                    Update-LoadingStatus -SplashForm $splashForm -Status "Modules ready..." -Progress 30
                 }
                 
                 # Establish service connections
