@@ -1,14 +1,12 @@
 function Initialize-PIMModules {
     <#
     .SYNOPSIS
-        Initializes and loads required modules with version pinning and just-in-time loading
+        Initializes required module version metadata for dependency loading.
     
     .DESCRIPTION
-        This function handles the initialization of required modules for PIM operations.
-        It ensures only the exact required versions are loaded and removes other versions
-        from the session to prevent assembly conflicts.
-        
-        Uses just-in-time loading - modules are only imported when actually needed.
+        This function handles the initialization of required module version metadata for PIM operations.
+        It validates that compatible module versions are available and can remove conflicting loaded
+        modules when forced. Import-PIMModule performs the actual module import.
     
     .PARAMETER Force
         Forces reinitialization even if modules are already loaded
@@ -38,7 +36,7 @@ function Initialize-PIMModules {
     # Add Azure modules if requested
     if ($IncludeAzureModules) {
         $script:RequiredModuleVersions['Az.Accounts'] = '5.1.0'
-        $script:RequiredModuleVersions['Az.Resources'] = '8.1.0'
+        $script:RequiredModuleVersions['Az.Resources'] = '6.0.0'
     }
     
     # All modules now use minimum version checking for better compatibility
@@ -115,7 +113,7 @@ function Initialize-PIMModules {
             $script:ModuleLoadingState = @{}
         }
         
-        Write-Verbose "All required modules are available. Modules will be loaded just-in-time."
+        Write-Verbose "All required modules are available."
         $result.Success = $true
         
     }

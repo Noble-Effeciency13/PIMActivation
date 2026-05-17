@@ -130,6 +130,22 @@ function Initialize-PIMForm {
         $btnSwitchAccount.FlatAppearance.BorderSize = 1
         $btnSwitchAccount.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
         $headerPanel.Controls.Add($btnSwitchAccount)
+
+        $btnActivationProfiles = New-Object System.Windows.Forms.Button -Property @{
+            Name      = 'btnActivationProfiles'
+            Text      = 'Activation Profiles'
+            Size      = [System.Drawing.Size]::new(160, 35)
+            BackColor = [System.Drawing.Color]::White
+            ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+            FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+            Font      = [System.Drawing.Font]::new('Segoe UI', 9)
+            Cursor    = [System.Windows.Forms.Cursors]::Hand
+            Anchor    = ([System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right)
+            Location  = [System.Drawing.Point]::new(870, 17)
+        }
+        $btnActivationProfiles.FlatAppearance.BorderSize = 1
+        $btnActivationProfiles.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+        $headerPanel.Controls.Add($btnActivationProfiles)
         
         # Add hover effects for Switch Account button
         $btnSwitchAccount.Add_MouseEnter({ 
@@ -137,6 +153,15 @@ function Initialize-PIMForm {
                 $this.ForeColor = [System.Drawing.Color]::White
             })
         $btnSwitchAccount.Add_MouseLeave({ 
+                $this.BackColor = [System.Drawing.Color]::White
+                $this.ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+            })
+
+        $btnActivationProfiles.Add_MouseEnter({
+                $this.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+                $this.ForeColor = [System.Drawing.Color]::White
+            })
+        $btnActivationProfiles.Add_MouseLeave({
                 $this.BackColor = [System.Drawing.Color]::White
                 $this.ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
             })
@@ -150,12 +175,12 @@ function Initialize-PIMForm {
             else { 
                 "Not signed in" 
             }
-            Size      = [System.Drawing.Size]::new(400, 20)
+            Size      = [System.Drawing.Size]::new(430, 20)
             Font      = [System.Drawing.Font]::new("Segoe UI", 9)
             TextAlign = 'MiddleRight'
             Anchor    = ([System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right)
             ForeColor = [System.Drawing.Color]::FromArgb(96, 94, 92)  # Medium gray
-            Location  = [System.Drawing.Point]::new(620, 25)
+            Location  = [System.Drawing.Point]::new(430, 25)
         }
         $headerPanel.Controls.Add($lblCurrentUser)
 
@@ -173,7 +198,7 @@ function Initialize-PIMForm {
             BorderStyle = [System.Windows.Forms.BorderStyle]::None
             Visible     = $true
         }
-        
+
         # Add separator line above control panel
         $controlSeparator = New-Object System.Windows.Forms.Label -Property @{
             Location  = [System.Drawing.Point]::new(0, 0)
@@ -182,7 +207,7 @@ function Initialize-PIMForm {
             Anchor    = ([System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right)
         }
         $controlPanel.Controls.Add($controlSeparator)
-        
+
         # Duration selection group
         $durationGroup = New-Object System.Windows.Forms.GroupBox -Property @{
             Text      = 'Activation Duration'
@@ -192,7 +217,7 @@ function Initialize-PIMForm {
             ForeColor = [System.Drawing.Color]::FromArgb(32, 31, 30)
         }
         $controlPanel.Controls.Add($durationGroup)
-        
+
         # Hours selection
         $lblHours = New-Object System.Windows.Forms.Label -Property @{
             Text     = 'Hours:'
@@ -201,7 +226,7 @@ function Initialize-PIMForm {
             Font     = [System.Drawing.Font]::new("Segoe UI", 9)
         }
         $durationGroup.Controls.Add($lblHours)
-        
+
         $cmbHours = New-Object System.Windows.Forms.ComboBox -Property @{
             Name          = 'cmbHours'
             Location      = [System.Drawing.Point]::new(60, 23)
@@ -210,9 +235,9 @@ function Initialize-PIMForm {
             Font          = [System.Drawing.Font]::new("Segoe UI", 9)
         }
         0..23 | ForEach-Object { [void]$cmbHours.Items.Add($_) }
-        $cmbHours.SelectedIndex = 8  # Default 8 hours
+        $cmbHours.SelectedIndex = 8
         $durationGroup.Controls.Add($cmbHours)
-        
+
         # Minutes selection
         $lblMinutes = New-Object System.Windows.Forms.Label -Property @{
             Text     = 'Minutes:'
@@ -221,7 +246,7 @@ function Initialize-PIMForm {
             Font     = [System.Drawing.Font]::new("Segoe UI", 9)
         }
         $durationGroup.Controls.Add($lblMinutes)
-        
+
         $cmbMinutes = New-Object System.Windows.Forms.ComboBox -Property @{
             Name          = 'cmbMinutes'
             Location      = [System.Drawing.Point]::new(190, 23)
@@ -230,9 +255,9 @@ function Initialize-PIMForm {
             Font          = [System.Drawing.Font]::new("Segoe UI", 9)
         }
         @(0, 30) | ForEach-Object { [void]$cmbMinutes.Items.Add($_) }
-        $cmbMinutes.SelectedIndex = 0  # Default 0 minutes
+        $cmbMinutes.SelectedIndex = 0
         $durationGroup.Controls.Add($cmbMinutes)
-        
+
         # Duration information label
         $lblDurationInfo = New-Object System.Windows.Forms.Label -Property @{
             Name      = 'lblDurationInfo'
@@ -435,10 +460,19 @@ function Initialize-PIMForm {
                     if ($btnSwitchAccount) {
                         $btnSwitchAccount.Location = [System.Drawing.Point]::new($this.ClientSize.Width - 160, 17)
                     }
+
+                    $btnActivationProfiles = $headerPanel.Controls | Where-Object { $_.Name -eq 'btnActivationProfiles' } | Select-Object -First 1
+                    if ($btnActivationProfiles) {
+                        $profileX = if ($btnSwitchAccount) { $btnSwitchAccount.Location.X - $btnActivationProfiles.Width - 10 } else { $this.ClientSize.Width - 330 }
+                        $btnActivationProfiles.Location = [System.Drawing.Point]::new($profileX, 17)
+                    }
                 
                     $lblCurrentUser = $headerPanel.Controls | Where-Object { $_.Name -eq 'lblCurrentUser' } | Select-Object -First 1
                     if ($lblCurrentUser) {
-                        $lblCurrentUser.Location = [System.Drawing.Point]::new($this.ClientSize.Width - 580, 25)
+                        $lblCurrentUser.Visible = $this.ClientSize.Width -gt 900
+                        $labelRight = if ($btnActivationProfiles) { $btnActivationProfiles.Location.X - 10 } else { $this.ClientSize.Width - 180 }
+                        $lblCurrentUser.Location = [System.Drawing.Point]::new(430, 25)
+                        $lblCurrentUser.Size = [System.Drawing.Size]::new([Math]::Max(180, $labelRight - 430), 20)
                     }
                 }
             
@@ -490,10 +524,19 @@ function Initialize-PIMForm {
                     if ($btnSwitchAccount -and -not $btnSwitchAccount.IsDisposed) {
                         $btnSwitchAccount.Location = [System.Drawing.Point]::new($this.ClientSize.Width - 160, 17)
                     }
+
+                    $btnActivationProfiles = $headerPanel.Controls | Where-Object { $_.Name -eq 'btnActivationProfiles' } | Select-Object -First 1
+                    if ($btnActivationProfiles -and -not $btnActivationProfiles.IsDisposed) {
+                        $profileX = if ($btnSwitchAccount) { $btnSwitchAccount.Location.X - $btnActivationProfiles.Width - 10 } else { $this.ClientSize.Width - 330 }
+                        $btnActivationProfiles.Location = [System.Drawing.Point]::new($profileX, 17)
+                    }
                 
                     $lblCurrentUser = $headerPanel.Controls | Where-Object { $_.Name -eq 'lblCurrentUser' } | Select-Object -First 1
                     if ($lblCurrentUser -and -not $lblCurrentUser.IsDisposed) {
-                        $lblCurrentUser.Location = [System.Drawing.Point]::new($this.ClientSize.Width - 580, 25)
+                        $lblCurrentUser.Visible = $this.ClientSize.Width -gt 900
+                        $labelRight = if ($btnActivationProfiles) { $btnActivationProfiles.Location.X - 10 } else { $this.ClientSize.Width - 180 }
+                        $lblCurrentUser.Location = [System.Drawing.Point]::new(430, 25)
+                        $lblCurrentUser.Size = [System.Drawing.Size]::new([Math]::Max(180, $labelRight - 430), 20)
                     }
                 }
             
@@ -531,6 +574,10 @@ function Initialize-PIMForm {
                 }
             })
         
+        $btnActivationProfiles.Add_Click({
+                Show-PIMActivationProfilesMenu -SourceControl $this
+            })
+
         # Switch Account button handler
         $btnSwitchAccount.Add_Click({
                 $confirmResult = [System.Windows.Forms.MessageBox]::Show(
@@ -605,12 +652,16 @@ function Initialize-PIMForm {
                 # Get checked items from active roles list
                 $activeListView = $Form.Controls.Find('lstActive', $true)[0]
                 if ($activeListView -and $activeListView.CheckedItems.Count -gt 0) {
-                    # Filter out permanent roles (no EndDateTime)
+                    # Filter out non-deactivatable roles: permanent (no EndDateTime) and
+                    # group-inherited (MemberType in 'Group'/'Inherited'). For inherited
+                    # assignments only the providing group membership can be deactivated.
                     $checkedItems = @(@($activeListView.CheckedItems) | Where-Object {
-                            $_ -is [System.Windows.Forms.ListViewItem] -and $_.Tag -and $_.Tag.PSObject.Properties['EndDateTime'] -and $_.Tag.EndDateTime
+                            $_ -is [System.Windows.Forms.ListViewItem] -and $_.Tag -and `
+                            $_.Tag.PSObject.Properties['EndDateTime'] -and $_.Tag.EndDateTime -and `
+                            (-not ($_.Tag.PSObject.Properties['MemberType'] -and $_.Tag.MemberType -in @('Group','Inherited')))
                         })
                     $checkedCount = ($checkedItems | Measure-Object).Count
-                    Write-Verbose "Found $checkedCount deactivatable active role(s) after filtering permanent roles"
+                    Write-Verbose "Found $checkedCount deactivatable active role(s) after filtering permanent and group-inherited roles"
                     
                     if ($checkedCount -gt 0) {
                         # Call deactivation function
@@ -619,7 +670,7 @@ function Initialize-PIMForm {
                     else {
                         [System.Windows.Forms.MessageBox]::Show(
                             $form,
-                            'No deactivatable roles selected. Permanent roles cannot be deactivated.',
+                            'No deactivatable roles selected. Permanent roles and group-inherited roles cannot be self-deactivated (deactivate the providing group membership instead).',
                             'No Deactivatable Selection',
                             [System.Windows.Forms.MessageBoxButtons]::OK,
                             [System.Windows.Forms.MessageBoxIcon]::Information
@@ -682,8 +733,7 @@ function Initialize-PIMForm {
                 $script:CachedEligibleRoles       = $null
                 $script:CachedActiveRoles         = $null
                 $script:LastRoleFetchTime         = $null
-                $script:PolicyCache               = @{}
-                $script:AuthenticationContextCache = @{}
+                Clear-PIMPolicyCache -IncludePersistent
                 $script:AzureRolesCache           = @()
                 $script:AzureRolesCacheTime       = $null
                 $script:DirtyAzureSubscriptions   = @()

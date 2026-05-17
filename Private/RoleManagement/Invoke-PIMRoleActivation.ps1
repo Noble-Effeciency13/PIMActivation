@@ -5,6 +5,7 @@ function Invoke-PIMRoleActivation {
     
     .DESCRIPTION
         Handles the complete PIM role activation process including:
+        - Scheduled activation start times selected in the activation dialog
         - Policy requirement validation (justification, tickets, MFA, authentication context)
         - Duration calculations based on role policies
         - Authentication context challenges for conditional access policies
@@ -39,7 +40,9 @@ function Invoke-PIMRoleActivation {
         [array]$CheckedItems,
         
         [Parameter(Mandatory)]
-        [System.Windows.Forms.Form]$Form
+        [System.Windows.Forms.Form]$Form,
+
+        [object]$ActivationProfile
     )
     
     Write-Verbose "Starting activation process for $($CheckedItems.Count) role(s)"
@@ -83,7 +86,97 @@ function Invoke-PIMRoleActivation {
         }
         return $roleList
     }
-    
+
+    $GetBatchOverview = {
+        param(
+            [string]$Title,
+            [string[]]$RoleNames
+        )
+
+        $safeRoleNames = @($RoleNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($safeRoleNames.Count -eq 0) { return $Title }
+
+        $maxVisibleRoles = 10
+        $visibleRoles = @($safeRoleNames | Select-Object -First $maxVisibleRoles)
+        $lines = [System.Collections.ArrayList]::new()
+        [void]$lines.Add($Title)
+        foreach ($roleName in $visibleRoles) {
+            [void]$lines.Add("- $roleName")
+        }
+
+        if ($safeRoleNames.Count -gt $maxVisibleRoles) {
+            [void]$lines.Add("- ... $($safeRoleNames.Count - $maxVisibleRoles) more")
+        }
+
+        return ($lines -join [Environment]::NewLine)
+    }
+
+    # Register an Entra/Group activation in the short-lived RecentlyActivated map so
+    # the active list can synthesize the row immediately, bypassing Graph propagation
+    # lag. Azure resource activations are handled by AzureActiveOverrides instead.
+    $RegisterRecentlyActivated = {
+        param($RoleData, $EffectiveDuration, $ScheduleStartTime)
+        try {
+            if (-not $RoleData) { return }
+            if ($RoleData.PSObject.Properties['Type'] -and $RoleData.Type -eq 'AzureResource') { return }
+            # Skip injection when the role requires approval; the request stays in
+            # PendingApproval and must not be shown as Active until approved.
+            if ($RoleData.PSObject.Properties['PolicyInfo'] -and $RoleData.PolicyInfo -and
+                $RoleData.PolicyInfo.PSObject.Properties['RequiresApproval'] -and $RoleData.PolicyInfo.RequiresApproval) {
+                Write-Verbose "Skipping RecentlyActivated registration for approval-required role: $($RoleData.DisplayName)"
+                return
+            }
+            if (-not (Get-Variable -Name 'RecentlyActivated' -Scope Script -ErrorAction SilentlyContinue) -or -not $script:RecentlyActivated) {
+                $script:RecentlyActivated = @{}
+            }
+            $startUtc = if ($ScheduleStartTime) { ([datetime]$ScheduleStartTime).ToUniversalTime() } else { (Get-Date).ToUniversalTime() }
+            $endUtc   = $startUtc
+            # EffectiveDuration may be a hashtable (Get-EffectiveDuration return) or PSCustomObject; support both.
+            if ($EffectiveDuration) {
+                $durHours = 0; $durMinutes = 0
+                if ($EffectiveDuration -is [hashtable] -or $EffectiveDuration -is [System.Collections.IDictionary]) {
+                    if ($EffectiveDuration.Contains('Hours')   -and $EffectiveDuration['Hours'])   { $durHours   = [int]$EffectiveDuration['Hours'] }
+                    if ($EffectiveDuration.Contains('Minutes') -and $EffectiveDuration['Minutes']) { $durMinutes = [int]$EffectiveDuration['Minutes'] }
+                }
+                else {
+                    if ($EffectiveDuration.PSObject.Properties['Hours']   -and $EffectiveDuration.Hours)   { $durHours   = [int]$EffectiveDuration.Hours }
+                    if ($EffectiveDuration.PSObject.Properties['Minutes'] -and $EffectiveDuration.Minutes) { $durMinutes = [int]$EffectiveDuration.Minutes }
+                }
+                if ($durHours)   { $endUtc = $endUtc.AddHours($durHours) }
+                if ($durMinutes) { $endUtc = $endUtc.AddMinutes($durMinutes) }
+            }
+            # Fallback: if no usable duration, hold the synthetic row for the full ExpiresLocal window.
+            if ($endUtc -le $startUtc) { $endUtc = $startUtc.AddHours(8) }
+            $key = $null
+            switch ($RoleData.Type) {
+                'Entra' {
+                    $rdef = $RoleData.RoleDefinitionId
+                    $ds   = if ($RoleData.PSObject.Properties['DirectoryScopeId'] -and $RoleData.DirectoryScopeId) { $RoleData.DirectoryScopeId } else { '/' }
+                    if ($rdef) { $key = "Entra|$rdef|$ds" }
+                }
+                'Group' {
+                    $gid = if ($RoleData.PSObject.Properties['GroupId']) { $RoleData.GroupId } else { $null }
+                    $aid = $null
+                    if ($RoleData.PSObject.Properties['AccessId'] -and $RoleData.AccessId) { $aid = $RoleData.AccessId }
+                    elseif ($RoleData.PSObject.Properties['MemberType'] -and $RoleData.MemberType) { $aid = $RoleData.MemberType.ToString().ToLower() }
+                    if ($gid -and $aid) { $key = "Group|$gid|$aid" }
+                }
+            }
+            if ($key) {
+                $script:RecentlyActivated[$key] = [PSCustomObject]@{
+                    EndDateTime  = $endUtc
+                    RoleSnapshot = $RoleData
+                    ExpiresLocal = (Get-Date).AddMinutes(5)
+                }
+                Write-Verbose "Registered recently-activated role: $key (ends $endUtc UTC)"
+                # Drop any stale deactivation suppression for this role.
+                if ((Get-Variable -Name 'RecentlyDeactivated' -Scope Script -ErrorAction SilentlyContinue) -and $script:RecentlyDeactivated -and $script:RecentlyDeactivated.ContainsKey($key)) {
+                    $null = $script:RecentlyDeactivated.Remove($key)
+                }
+            }
+        } catch { Write-Verbose "Failed to register recently-activated role: $($_.Exception.Message)" }
+    }
+
     try {
         # Initialize duration from script variable or use default
         $requestedHours = 8
@@ -106,6 +199,18 @@ function Invoke-PIMRoleActivation {
         
         $requestedTotalMinutes = ($requestedHours * 60) + $requestedMinutes
         Write-Verbose "Using requested duration: $requestedHours hours, $requestedMinutes minutes"
+
+        $activationProfileName = if ($ActivationProfile -and $ActivationProfile.PSObject.Properties['Name'] -and $ActivationProfile.Name) {
+            [string]$ActivationProfile.Name
+        }
+        else {
+            ''
+        }
+        $activationProfileDuration = @{
+            Hours        = $requestedHours
+            Minutes      = $requestedMinutes
+            TotalMinutes = $requestedTotalMinutes
+        }
 
         # Analyze policy requirements across all selected roles
         $policyRequirements = @{
@@ -147,7 +252,13 @@ function Invoke-PIMRoleActivation {
             $result = Show-PIMActivationDialog -RequiresJustification:$policyRequirements.RequiresJustification `
                 -RequiresTicket:$policyRequirements.RequiresTicket `
                 -OptionalJustification:$(-not $policyRequirements.RequiresJustification) `
-                -ShowAzureReducedScope:$showAzureReducedScope
+                -ShowAzureReducedScope:$showAzureReducedScope `
+                -AzureRoleItems $selectedAzureRoleItems `
+                -ProfileRoleItems $CheckedItems `
+                -ProfileDefaultDuration $activationProfileDuration `
+                -ActivationProfileName $activationProfileName `
+                -AllowSaveAsProfile:$([string]::IsNullOrWhiteSpace($activationProfileName)) `
+                -AllowProfileManagement:$(-not [string]::IsNullOrWhiteSpace($activationProfileName))
             
             if ($result.Cancelled) {
                 Write-Verbose "User cancelled activation"
@@ -162,6 +273,21 @@ function Invoke-PIMRoleActivation {
                 }
             }
         }
+
+        $scheduleStartTime = $null
+        if ($result -and $result.PSObject.Properties['ScheduleForLater'] -and $result.ScheduleForLater -and $result.PSObject.Properties['ScheduledStartTime'] -and $result.ScheduledStartTime) {
+            $scheduleStartTime = [datetime]$result.ScheduledStartTime
+            if ($scheduleStartTime.Kind -eq [System.DateTimeKind]::Unspecified) {
+                $scheduleStartTime = [datetime]::SpecifyKind($scheduleStartTime, [System.DateTimeKind]::Local)
+            }
+            else {
+                $scheduleStartTime = $scheduleStartTime.ToLocalTime()
+            }
+            Write-Verbose "Scheduling activation request(s) for $($scheduleStartTime.ToString('yyyy-MM-dd HH:mm')) local time"
+        }
+
+        $batchActionTitle = if ($scheduleStartTime) { 'Scheduling Activation Batch:' } else { 'Activating Batch:' }
+        $isScheduledForFuture = [bool]$scheduleStartTime
 
         $azureReducedScopeOverrides = @{}
         $azureTargetScope = if ($result -and $result.PSObject.Properties['AzureReducedScope'] -and -not [string]::IsNullOrWhiteSpace($result.AzureReducedScope)) {
@@ -259,7 +385,12 @@ function Invoke-PIMRoleActivation {
         Write-Verbose "Authentication-context roles: $($authContextRoles.Count) across $($authContextIds.Count) context(s) [$authContextLabel], $($noContextRoles.Count) without context"
 
         # NOW show the splash form after all user input has been collected
-        $operationSplash = Show-OperationSplash -Title "Role Activation" -InitialMessage "Processing role activations..." -ShowProgressBar $true
+        $selectedRoleNames = @($CheckedItems | ForEach-Object {
+                if ($_.Tag -and $_.Tag.PSObject.Properties['DisplayName'] -and $_.Tag.DisplayName) { $_.Tag.DisplayName } else { $_.Text }
+            } | Where-Object { $_ })
+        $batchOverview = & $GetBatchOverview $batchActionTitle $selectedRoleNames
+        $splashHeight = [Math]::Min(360, [Math]::Max(220, 150 + ([Math]::Min($selectedRoleNames.Count, 10) * 18)))
+        $operationSplash = Show-OperationSplash -Title "Role Activation" -InitialMessage $batchOverview -ShowProgressBar $true -Width 520 -Height $splashHeight
         $activationErrors = @()
         $successCount = 0
         $totalRoles = $CheckedItems.Count
@@ -299,10 +430,20 @@ function Invoke-PIMRoleActivation {
                         $effectiveDuration = Get-EffectiveDuration -RequestedMinutes $requestedTotalMinutes -MaxDurationHours $roleData.PolicyInfo.MaxDuration
 
                         try {
-                            $result = Invoke-SingleRoleActivation -RoleData $roleData -Justification $justification -EffectiveDuration $effectiveDuration -TicketInfo $ticketInfo -AuthenticationContextId $contextId -UseFallbackMethod
+                            $singleActivationArgs = @{
+                                RoleData                = $roleData
+                                Justification           = $justification
+                                EffectiveDuration       = $effectiveDuration
+                                TicketInfo              = $ticketInfo
+                                AuthenticationContextId = $contextId
+                                UseFallbackMethod       = $true
+                            }
+                            if ($scheduleStartTime) { $singleActivationArgs.ScheduleStartTime = $scheduleStartTime }
+                            $result = Invoke-SingleRoleActivation @singleActivationArgs
                             if ($result.Success) {
                                 $successCount++
                                 Write-Verbose "$($roleData.Type) role activated with authentication context fallback"
+                                & $RegisterRecentlyActivated $roleData $effectiveDuration $scheduleStartTime
                             }
                             else {
                                 $friendlyError = if ($result.Error -and $result.Error.Exception) { Get-FriendlyErrorMessage -Exception $result.Error.Exception -ErrorDetails $result.ErrorDetails } elseif ($result.ErrorMessage) { $result.ErrorMessage } else { "Activation failed" }
@@ -325,7 +466,14 @@ function Invoke-PIMRoleActivation {
                     foreach ($item in $authContextGraphItems) {
                         $roleData = $item.Tag
                         $effectiveDuration = Get-EffectiveDuration -RequestedMinutes $requestedTotalMinutes -MaxDurationHours $roleData.PolicyInfo.MaxDuration
-                        $activationParams = Get-RoleActivationParameters -RoleData $roleData -Justification $justification -EffectiveDuration $effectiveDuration -TicketInfo $ticketInfo
+                        $activationParamArgs = @{
+                            RoleData          = $roleData
+                            Justification     = $justification
+                            EffectiveDuration = $effectiveDuration
+                            TicketInfo        = $ticketInfo
+                        }
+                        if ($scheduleStartTime) { $activationParamArgs.ScheduleStartTime = $scheduleStartTime }
+                        $activationParams = Get-RoleActivationParameters @activationParamArgs
                         $batchId = "$($graphAuthBatchRequestBodies.Count + 1)"
 
                         $reqUrl = switch ($roleData.Type) {
@@ -391,7 +539,7 @@ function Invoke-PIMRoleActivation {
                         try {
                             Write-Verbose "Submitting Graph authentication-context batch $batchNumber with $($chunk.Count) role(s): $chunkRoleList"
                             if ($operationSplash -and -not $operationSplash.IsDisposed) {
-                                $operationSplash.UpdateStatus("Submitting auth-context Graph batch $batchNumber`: $statusRoleList", 35)
+                                $operationSplash.UpdateStatus($batchOverview, 35)
                             }
 
                             $graphBatchHeaders = @{ 'Authorization' = "Bearer $graphAuthContextToken"; 'Content-Type' = 'application/json' }
@@ -407,6 +555,7 @@ function Invoke-PIMRoleActivation {
                                 if ($resp.status -ge 200 -and $resp.status -lt 300) {
                                     Write-Verbose "$($roleData.Type) role activated via auth-context Graph batch - id: $($resp.body.id)"
                                     $successCount++
+                                    & $RegisterRecentlyActivated $roleData $meta.EffectiveDuration $scheduleStartTime
                                 }
                                 else {
                                     $errMsg = if ($resp.body -and $resp.body.error -and $resp.body.error.message) { $resp.body.error.message } else { "HTTP $($resp.status)" }
@@ -425,10 +574,19 @@ function Invoke-PIMRoleActivation {
                                 $currentRole++
                                 $roleData = $meta.RoleData
                                 try {
-                                    $result = Invoke-SingleRoleActivation -RoleData $roleData -Justification $justification -EffectiveDuration $meta.EffectiveDuration -TicketInfo $ticketInfo -AuthContextToken $graphAuthContextToken
+                                    $singleActivationArgs = @{
+                                        RoleData          = $roleData
+                                        Justification     = $justification
+                                        EffectiveDuration = $meta.EffectiveDuration
+                                        TicketInfo        = $ticketInfo
+                                        AuthContextToken  = $graphAuthContextToken
+                                    }
+                                    if ($scheduleStartTime) { $singleActivationArgs.ScheduleStartTime = $scheduleStartTime }
+                                    $result = Invoke-SingleRoleActivation @singleActivationArgs
                                     if ($result.Success) {
                                         $successCount++
                                         Write-Verbose "$($roleData.Type) role activated with shared auth-context token fallback"
+                                        & $RegisterRecentlyActivated $roleData $meta.EffectiveDuration $scheduleStartTime
                                     }
                                     else {
                                         $friendlyError = if ($result.Error -and $result.Error.Exception) { Get-FriendlyErrorMessage -Exception $result.Error.Exception -ErrorDetails $result.ErrorDetails } elseif ($result.ErrorMessage) { $result.ErrorMessage } else { "Activation failed" }
@@ -474,6 +632,9 @@ function Invoke-PIMRoleActivation {
                                 AuthenticationContextId  = $contextId
                                 UseFallbackMethod        = $true
                             }
+                            if ($scheduleStartTime) {
+                                $singleActivationArgs.ScheduleStartTime = $scheduleStartTime
+                            }
                             if ($scopeOverride) {
                                 $singleActivationArgs.AzureTargetScope = $scopeOverride.TargetScope
                                 $singleActivationArgs.LinkedRoleEligibilityScheduleId = $scopeOverride.LinkedRoleEligibilityScheduleId
@@ -507,6 +668,9 @@ function Invoke-PIMRoleActivation {
                             EffectiveDuration = $effectiveDuration
                             TicketInfo        = $ticketInfo
                         }
+                        if ($scheduleStartTime) {
+                            $azureParamArgs.ScheduleStartTime = $scheduleStartTime
+                        }
                         if ($scopeOverride) {
                             $azureParamArgs.AzureTargetScope = $scopeOverride.TargetScope
                             $azureParamArgs.LinkedRoleEligibilityScheduleId = $scopeOverride.LinkedRoleEligibilityScheduleId
@@ -527,7 +691,7 @@ function Invoke-PIMRoleActivation {
                     Write-Verbose "Submitting Azure Resource authentication-context batch with $($azureAuthJobList.Count) role(s): $azureAuthRoleList"
                     if ($operationSplash -and -not $operationSplash.IsDisposed) {
                         $statusRoleList = & $GetStatusSafeRoleList $azureAuthRoleNames
-                        $operationSplash.UpdateStatus("Submitting auth-context Azure batch: $statusRoleList", 45)
+                        $operationSplash.UpdateStatus($batchOverview, 45)
                     }
 
                     $azureAuthResults = $azureAuthJobList | ForEach-Object -Parallel {
@@ -595,24 +759,38 @@ function Invoke-PIMRoleActivation {
                                 Write-Verbose "Azure Resource role used reduced scope: $($azResult.OriginalScope) -> $($azResult.ActivationScope)"
                             }
                             try {
-                                if (-not (Get-Variable -Name 'AzureActiveOverrides' -Scope Script -ErrorAction SilentlyContinue)) { $script:AzureActiveOverrides = @{} }
-                                $endUtc = (Get-Date).ToUniversalTime().AddHours($effectiveDuration.Hours).AddMinutes($effectiveDuration.Minutes)
-                                $roleDefKey = $roleData.RoleDefinitionId
-                                if ($roleDefKey -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $roleDefKey = $matches[1] }
-                                $fullScope = if ($azResult.ActivationScope) { $azResult.ActivationScope } elseif ($roleData.FullScope) { $roleData.FullScope } else { $roleData.DirectoryScopeId }
-                                $overrideKey = "$fullScope|$roleDefKey"
-                                $script:AzureActiveOverrides[$overrideKey] = [PSCustomObject]@{ EndDateTime = $endUtc }
-                                Write-Verbose "Recorded Azure active override for $overrideKey"
-                                if (-not (Get-Variable -Name 'DirtyAzureSubscriptions' -Scope Script -ErrorAction SilentlyContinue)) { $script:DirtyAzureSubscriptions = @() }
-                                if (-not (Get-Variable -Name 'DirtyManagementGroups' -Scope Script -ErrorAction SilentlyContinue)) { $script:DirtyManagementGroups = @() }
-                                if ($fullScope -match '^/subscriptions/([a-fA-F0-9\-]{36})') {
-                                    $script:DirtyAzureSubscriptions += $matches[1]
-                                    $script:DirtyAzureSubscriptions = @($script:DirtyAzureSubscriptions | Select-Object -Unique)
+                                if ($isScheduledForFuture) {
+                                    Write-Verbose "Skipping immediate Azure active override for future scheduled activation: $($roleData.DisplayName)"
                                 }
-                                if ($fullScope -match "^/providers/Microsoft\.Management/managementGroups/([^/]+)$") {
-                                    $mgName = $matches[1]
-                                    $script:DirtyManagementGroups += $mgName
-                                    $script:DirtyManagementGroups = @($script:DirtyManagementGroups | Select-Object -Unique)
+                                elseif ($roleData.PSObject.Properties['PolicyInfo'] -and $roleData.PolicyInfo -and
+                                        $roleData.PolicyInfo.PSObject.Properties['RequiresApproval'] -and $roleData.PolicyInfo.RequiresApproval) {
+                                    Write-Verbose "Skipping Azure active override for approval-required role: $($roleData.DisplayName)"
+                                }
+                                else {
+                                    if (-not (Get-Variable -Name 'AzureActiveOverrides' -Scope Script -ErrorAction SilentlyContinue)) { $script:AzureActiveOverrides = @{} }
+                                    $endUtc = (Get-Date).ToUniversalTime().AddHours($effectiveDuration.Hours).AddMinutes($effectiveDuration.Minutes)
+                                    $roleDefKey = $roleData.RoleDefinitionId
+                                    if ($roleDefKey -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $roleDefKey = $matches[1] }
+                                    $fullScope = if ($azResult.ActivationScope) { $azResult.ActivationScope } elseif ($roleData.FullScope) { $roleData.FullScope } else { $roleData.DirectoryScopeId }
+                                    $overrideKey = "$fullScope|$roleDefKey"
+                                    $script:AzureActiveOverrides[$overrideKey] = [PSCustomObject]@{
+                                        EndDateTime  = $endUtc
+                                        FullScope    = $fullScope
+                                        RoleDefKey   = $roleDefKey
+                                        RoleSnapshot = $roleData
+                                    }
+                                    Write-Verbose "Recorded Azure active override for $overrideKey"
+                                    if (-not (Get-Variable -Name 'DirtyAzureSubscriptions' -Scope Script -ErrorAction SilentlyContinue)) { $script:DirtyAzureSubscriptions = @() }
+                                    if (-not (Get-Variable -Name 'DirtyManagementGroups' -Scope Script -ErrorAction SilentlyContinue)) { $script:DirtyManagementGroups = @() }
+                                    if ($fullScope -match '^/subscriptions/([a-fA-F0-9\-]{36})') {
+                                        $script:DirtyAzureSubscriptions += $matches[1]
+                                        $script:DirtyAzureSubscriptions = @($script:DirtyAzureSubscriptions | Select-Object -Unique)
+                                    }
+                                    if ($fullScope -match "^/providers/Microsoft\.Management/managementGroups/([^/]+)$") {
+                                        $mgName = $matches[1]
+                                        $script:DirtyManagementGroups += $mgName
+                                        $script:DirtyManagementGroups = @($script:DirtyManagementGroups | Select-Object -Unique)
+                                    }
                                 }
                             }
                             catch { Write-Verbose "Failed to record Azure active override: $($_.Exception.Message)" }
@@ -637,7 +815,7 @@ function Invoke-PIMRoleActivation {
         # ── Graph roles: Microsoft Graph $batch API (up to 20 per batch call) ─
         if ($graphNoCtxItems.Count -gt 0) {
             if ($operationSplash -and -not $operationSplash.IsDisposed) {
-                $operationSplash.UpdateStatus("Submitting $($graphNoCtxItems.Count) Graph role activation(s) in batch...", 60)
+                $operationSplash.UpdateStatus($batchOverview, 60)
             }
 
             $batchRequestBodies = [System.Collections.ArrayList]::new()
@@ -646,7 +824,14 @@ function Invoke-PIMRoleActivation {
             foreach ($item in $graphNoCtxItems) {
                 $roleData          = $item.Tag
                 $effectiveDuration = Get-EffectiveDuration -RequestedMinutes $requestedTotalMinutes -MaxDurationHours $roleData.PolicyInfo.MaxDuration
-                $activationParams  = Get-RoleActivationParameters -RoleData $roleData -Justification $justification -EffectiveDuration $effectiveDuration -TicketInfo $ticketInfo
+                $activationParamArgs = @{
+                    RoleData          = $roleData
+                    Justification     = $justification
+                    EffectiveDuration = $effectiveDuration
+                    TicketInfo        = $ticketInfo
+                }
+                if ($scheduleStartTime) { $activationParamArgs.ScheduleStartTime = $scheduleStartTime }
+                $activationParams = Get-RoleActivationParameters @activationParamArgs
                 $batchId           = "$($batchRequestBodies.Count + 1)"
 
                 $reqUrl = switch ($roleData.Type) {
@@ -712,7 +897,7 @@ function Invoke-PIMRoleActivation {
                 try {
                     Write-Verbose "Submitting Graph activation batch $batchNumber with $($chunk.Count) role(s): $chunkRoleList"
                     if ($operationSplash -and -not $operationSplash.IsDisposed) {
-                        $operationSplash.UpdateStatus("Submitting Graph batch $batchNumber`: $statusRoleList", 62)
+                        $operationSplash.UpdateStatus($batchOverview, 62)
                     }
                     $batchResponse = Invoke-MgGraphRequest -Method POST -Uri '$batch' -Body $batchBody -ErrorAction Stop
 
@@ -725,6 +910,7 @@ function Invoke-PIMRoleActivation {
                         if ($resp.status -ge 200 -and $resp.status -lt 300) {
                             Write-Verbose "$($roleData.Type) role activated via Graph batch - id: $($resp.body.id)"
                             $successCount++
+                            & $RegisterRecentlyActivated $roleData $meta.EffectiveDuration $scheduleStartTime
                         }
                         else {
                             $errMsg = if ($resp.body -and $resp.body.error -and $resp.body.error.message) {
@@ -745,7 +931,14 @@ function Invoke-PIMRoleActivation {
                         $currentRole++
                         $roleData = $meta.RoleData
                         try {
-                            $result = Invoke-SingleRoleActivation -RoleData $roleData -Justification $justification -EffectiveDuration $meta.EffectiveDuration -TicketInfo $ticketInfo
+                            $singleActivationArgs = @{
+                                RoleData          = $roleData
+                                Justification     = $justification
+                                EffectiveDuration = $meta.EffectiveDuration
+                                TicketInfo        = $ticketInfo
+                            }
+                            if ($scheduleStartTime) { $singleActivationArgs.ScheduleStartTime = $scheduleStartTime }
+                            $result = Invoke-SingleRoleActivation @singleActivationArgs
                             if ($result.Success) {
                                 $successCount++
                                 $responseId = & $GetActivationResponseId $result
@@ -755,6 +948,7 @@ function Invoke-PIMRoleActivation {
                                 else {
                                     Write-Verbose "$($roleData.Type) role activated (sequential fallback)"
                                 }
+                                & $RegisterRecentlyActivated $roleData $meta.EffectiveDuration $scheduleStartTime
                             }
                             else {
                                 $friendlyError = Get-FriendlyErrorMessage -Exception $result.Error.Exception -ErrorDetails $result.ErrorDetails
@@ -773,7 +967,7 @@ function Invoke-PIMRoleActivation {
         # ── Azure Resource roles: submit in parallel via ARM REST PUT ─────────
         if ($azureNoCtxItems.Count -gt 0) {
             if ($operationSplash -and -not $operationSplash.IsDisposed) {
-                $operationSplash.UpdateStatus("Submitting $($azureNoCtxItems.Count) Azure Resource role activation(s) in parallel...", 75)
+                $operationSplash.UpdateStatus($batchOverview, 75)
             }
 
             # Acquire ARM token once for all parallel requests
@@ -801,6 +995,9 @@ function Invoke-PIMRoleActivation {
                     EffectiveDuration = $effectiveDuration
                     TicketInfo        = $ticketInfo
                 }
+                if ($scheduleStartTime) {
+                    $azureParamArgs.ScheduleStartTime = $scheduleStartTime
+                }
                 if ($scopeOverride) {
                     $azureParamArgs.AzureTargetScope = $scopeOverride.TargetScope
                     $azureParamArgs.LinkedRoleEligibilityScheduleId = $scopeOverride.LinkedRoleEligibilityScheduleId
@@ -821,7 +1018,7 @@ function Invoke-PIMRoleActivation {
             Write-Verbose "Submitting Azure Resource activation batch with $($azureJobList.Count) role(s): $azureRoleList"
             if ($operationSplash -and -not $operationSplash.IsDisposed) {
                 $statusRoleList = & $GetStatusSafeRoleList $azureRoleNames
-                $operationSplash.UpdateStatus("Submitting Azure batch: $statusRoleList", 78)
+                $operationSplash.UpdateStatus($batchOverview, 78)
             }
 
             # Submit in parallel using ARM REST PUT (avoids Az module context issues in runspaces)
@@ -875,6 +1072,10 @@ function Invoke-PIMRoleActivation {
                 }
             } -ThrottleLimit 5
 
+            # Best-effort scrub of plaintext bearer token from memory now that
+            # the parallel runspaces have captured their copies and completed.
+            $armTokenForParallel = $null
+
             foreach ($azResult in @($azureResults)) {
                 $currentRole++
                 $roleData          = $azResult.RoleData
@@ -887,24 +1088,38 @@ function Invoke-PIMRoleActivation {
                         Write-Verbose "Azure Resource role used reduced scope: $($azResult.OriginalScope) -> $($azResult.ActivationScope)"
                     }
                     try {
-                        if (-not (Get-Variable -Name 'AzureActiveOverrides' -Scope Script -ErrorAction SilentlyContinue)) { $script:AzureActiveOverrides = @{} }
-                        $endUtc      = (Get-Date).ToUniversalTime().AddHours($effectiveDuration.Hours).AddMinutes($effectiveDuration.Minutes)
-                        $roleDefKey  = $roleData.RoleDefinitionId
-                        if ($roleDefKey -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $roleDefKey = $matches[1] }
-                        $fullScope   = if ($azResult.ActivationScope) { $azResult.ActivationScope } elseif ($roleData.FullScope) { $roleData.FullScope } else { $roleData.DirectoryScopeId }
-                        $overrideKey = "$fullScope|$roleDefKey"
-                        $script:AzureActiveOverrides[$overrideKey] = [PSCustomObject]@{ EndDateTime = $endUtc }
-                        Write-Verbose "Recorded Azure active override for $overrideKey"
-                        if (-not (Get-Variable -Name 'DirtyAzureSubscriptions' -Scope Script -ErrorAction SilentlyContinue)) { $script:DirtyAzureSubscriptions = @() }
-                        if (-not (Get-Variable -Name 'DirtyManagementGroups'   -Scope Script -ErrorAction SilentlyContinue)) { $script:DirtyManagementGroups   = @() }
-                        if ($fullScope -match '^/subscriptions/([a-fA-F0-9\-]{36})') {
-                            $script:DirtyAzureSubscriptions += $matches[1]
-                            $script:DirtyAzureSubscriptions  = @($script:DirtyAzureSubscriptions | Select-Object -Unique)
+                        if ($isScheduledForFuture) {
+                            Write-Verbose "Skipping immediate Azure active override for future scheduled activation: $($roleData.DisplayName)"
                         }
-                        if ($fullScope -match "^/providers/Microsoft\.Management/managementGroups/([^/]+)$") {
-                            $mgName = $matches[1]
-                            $script:DirtyManagementGroups += $mgName
-                            $script:DirtyManagementGroups  = @($script:DirtyManagementGroups | Select-Object -Unique)
+                        elseif ($roleData.PSObject.Properties['PolicyInfo'] -and $roleData.PolicyInfo -and
+                                $roleData.PolicyInfo.PSObject.Properties['RequiresApproval'] -and $roleData.PolicyInfo.RequiresApproval) {
+                            Write-Verbose "Skipping Azure active override for approval-required role: $($roleData.DisplayName)"
+                        }
+                        else {
+                            if (-not (Get-Variable -Name 'AzureActiveOverrides' -Scope Script -ErrorAction SilentlyContinue)) { $script:AzureActiveOverrides = @{} }
+                            $endUtc      = (Get-Date).ToUniversalTime().AddHours($effectiveDuration.Hours).AddMinutes($effectiveDuration.Minutes)
+                            $roleDefKey  = $roleData.RoleDefinitionId
+                            if ($roleDefKey -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") { $roleDefKey = $matches[1] }
+                            $fullScope   = if ($azResult.ActivationScope) { $azResult.ActivationScope } elseif ($roleData.FullScope) { $roleData.FullScope } else { $roleData.DirectoryScopeId }
+                            $overrideKey = "$fullScope|$roleDefKey"
+                            $script:AzureActiveOverrides[$overrideKey] = [PSCustomObject]@{
+                                EndDateTime  = $endUtc
+                                FullScope    = $fullScope
+                                RoleDefKey   = $roleDefKey
+                                RoleSnapshot = $roleData
+                            }
+                            Write-Verbose "Recorded Azure active override for $overrideKey"
+                            if (-not (Get-Variable -Name 'DirtyAzureSubscriptions' -Scope Script -ErrorAction SilentlyContinue)) { $script:DirtyAzureSubscriptions = @() }
+                            if (-not (Get-Variable -Name 'DirtyManagementGroups'   -Scope Script -ErrorAction SilentlyContinue)) { $script:DirtyManagementGroups   = @() }
+                            if ($fullScope -match '^/subscriptions/([a-fA-F0-9\-]{36})') {
+                                $script:DirtyAzureSubscriptions += $matches[1]
+                                $script:DirtyAzureSubscriptions  = @($script:DirtyAzureSubscriptions | Select-Object -Unique)
+                            }
+                            if ($fullScope -match "^/providers/Microsoft\.Management/managementGroups/([^/]+)$") {
+                                $mgName = $matches[1]
+                                $script:DirtyManagementGroups += $mgName
+                                $script:DirtyManagementGroups  = @($script:DirtyManagementGroups | Select-Object -Unique)
+                            }
                         }
                     }
                     catch { Write-Verbose "Failed to record Azure active override: $($_.Exception.Message)" }
@@ -928,7 +1143,13 @@ function Invoke-PIMRoleActivation {
         }
         
         # Display activation results
-        Show-ActivationResults -SuccessCount $successCount -TotalCount $CheckedItems.Count -Errors $activationErrors
+        $activationResultArgs = @{
+            SuccessCount = $successCount
+            TotalCount   = $CheckedItems.Count
+            Errors       = $activationErrors
+        }
+        if ($scheduleStartTime) { $activationResultArgs.ScheduledStartTime = $scheduleStartTime }
+        Show-ActivationResults @activationResultArgs
         
         # Refresh role lists to reflect changes
         if ($operationSplash -and -not $operationSplash.IsDisposed) {
@@ -957,8 +1178,9 @@ function Invoke-PIMRoleActivation {
                 $_.Tag.PolicyInfo.RequiresApproval
             }).Count -gt 0
 
-            if ($anyNeedsApproval) {
-                Write-Verbose "At least one role requires approval - refreshing both active and eligible panels"
+            if ($anyNeedsApproval -or $scheduleStartTime) {
+                $refreshReason = if ($scheduleStartTime) { 'scheduled activation request submitted' } else { 'at least one role requires approval' }
+                Write-Verbose "$refreshReason - refreshing both active and eligible panels"
                 # Force re-fetch so pending requests are picked up
                 $script:CachedEligibleRoles = $null
                 Update-PIMRolesList -Form $Form -RefreshActive -RefreshEligible

@@ -41,6 +41,26 @@ if (-not (Test-Path Variable:script:PolicyCache)) {
     $script:PolicyCache = @{}
 }
 
+if (-not (Test-Path Variable:script:PIMPolicyCacheStaleAfterHours)) {
+    $script:PIMPolicyCacheStaleAfterHours = 24
+}
+
+if (-not (Test-Path Variable:script:PIMPolicyCacheMaxAgeDays)) {
+    $script:PIMPolicyCacheMaxAgeDays = 30
+}
+
+if (-not (Test-Path Variable:script:PIMPolicyCacheLoadedForScope)) {
+    $script:PIMPolicyCacheLoadedForScope = $null
+}
+
+if (-not (Test-Path Variable:script:PIMPolicyBackgroundRefreshJob)) {
+    $script:PIMPolicyBackgroundRefreshJob = $null
+}
+
+if (-not (Test-Path Variable:script:PIMPolicyBackgroundRefreshTimer)) {
+    $script:PIMPolicyBackgroundRefreshTimer = $null
+}
+
 # Authentication context cache
 if (-not (Test-Path Variable:script:AuthenticationContextCache)) {
     $script:AuthenticationContextCache = @{}
@@ -74,7 +94,7 @@ $script:AuthContextTokens = @{}
 $script:JustCompletedAuthContext = $null
 $script:AuthContextCompletionTime = $null
 
-# Module loading state for just-in-time loading
+# Module loading state for dependency imports
 $script:ModuleLoadingState = @{}
 $script:RequiredModuleVersions = @{
     'Microsoft.Graph.Authentication'               = '2.29.0'
@@ -155,27 +175,28 @@ if ($Public) {
 
 #region Module Initialization
 
-# Eagerly import all required Graph modules at module-load time so that the first call
+# Eagerly import required Graph and Azure modules at module-load time so that the first call
 # to Start-PIMActivation does not have to pay the module-import cost.
-# Az modules are NOT loaded here because they are optional / conditional at runtime.
 $script:DependenciesValidated = $false
 
 try {
     # Initialize-PIMModules sets $script:RequiredModuleVersions and validates availability
-    $script:_preloadResult = Initialize-PIMModules
+    $script:_preloadResult = Initialize-PIMModules -IncludeAzureModules
     if ($script:_preloadResult.Success) {
-        # Import Graph modules in dependency order
-        $script:_graphModuleOrder = @(
+        # Import dependencies in a stable order for predictable console output
+        $script:_dependencyModuleOrder = @(
             'Microsoft.Graph.Authentication',
             'Microsoft.Graph.Identity.DirectoryManagement',
             'Microsoft.Graph.Identity.Governance',
             'Microsoft.Graph.Identity.SignIns',
             'Microsoft.Graph.Groups',
-            'Microsoft.Graph.Users'
+            'Microsoft.Graph.Users',
+            'Az.Accounts',
+            'Az.Resources'
         )
         $allLoaded = $true
         Write-Host "PIMActivation: loading dependencies..." -ForegroundColor Cyan
-        foreach ($mod in $script:_graphModuleOrder) {
+        foreach ($mod in $script:_dependencyModuleOrder) {
             $loadedOk = Import-PIMModule -ModuleName $mod
             if ($loadedOk) {
                 $loadedModule = Get-Module -Name $mod -ErrorAction SilentlyContinue
@@ -193,14 +214,13 @@ try {
         }
     }
     else {
-        # Modules not yet installed; Start-PIMActivation will install them on first call
-        Write-Warning "PIMActivation: required modules are not installed ($($script:_preloadResult.Error)). Run Start-PIMActivation to install them automatically."
+        Write-Warning "PIMActivation: required modules are not installed or do not meet minimum versions ($($script:_preloadResult.Error)). Install the missing modules and re-import PIMActivation."
     }
-    Remove-Variable -Name _preloadResult, _graphModuleOrder -Scope Script -ErrorAction SilentlyContinue
+    Remove-Variable -Name _preloadResult, _dependencyModuleOrder -Scope Script -ErrorAction SilentlyContinue
 }
 catch {
-    # Non-fatal – Start-PIMActivation will retry dependency resolution
-    Write-Verbose "PIMActivation: module pre-load error: $($_.Exception.Message). Dependencies will be resolved on first run."
+    # Non-fatal; Start-PIMActivation will retry module imports before opening the UI.
+    Write-Verbose "PIMActivation: module pre-load error: $($_.Exception.Message). Module imports will be retried on first run."
 }
 
 # Check PowerShell Gallery for newer module version and notify on import (best-effort)

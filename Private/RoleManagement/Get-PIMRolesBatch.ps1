@@ -5,7 +5,7 @@ function Get-PIMRolesBatch {
     
     .DESCRIPTION
         Fetches eligible and active roles with their associated data in minimal API calls.
-        Includes role definitions, policies, and authentication contexts. This function
+        Includes role definitions and policies. This function
         significantly improves performance by batching API requests instead of individual calls.
     
     .PARAMETER UserId
@@ -43,7 +43,7 @@ function Get-PIMRolesBatch {
         - ActiveRoles: Array of active role objects
         - RoleDefinitions: Hashtable of cached role definitions
         - Policies: Hashtable of cached policy information
-        - AuthenticationContexts: Hashtable of cached authentication contexts
+        - AuthenticationContexts: Reserved compatibility hashtable; authentication-context IDs are carried on Policies
     
     .NOTES
         This function uses batch API operations to minimize the number of Graph API calls,
@@ -670,18 +670,39 @@ function Get-PIMRolesBatch {
                     if (-not (Get-Variable -Name 'AzureActiveOverrides' -Scope Script -ErrorAction SilentlyContinue)) { $script:AzureActiveOverrides = @{} }
                     if ($script:AzureActiveOverrides -and $script:AzureActiveOverrides.Count -gt 0) {
                     Write-Verbose "Applying Azure active overrides to cache for immediate visibility"
+                    # Pre-compute which override keys are already represented by a real
+                    # Active cache entry. When the ARM eligibility+assignment schedules
+                    # both come back, the cache will contain an Eligible row AND an
+                    # Active row for the same role; without this guard the override
+                    # would flip the Eligible row to Active too, producing duplicates.
+                    $activeKeys = @{}
+                    foreach ($role in $script:AzureRolesCache) {
+                        try {
+                            if ($role.Status -ne 'Active') { continue }
+                            $fsA = if ($role.PSObject.Properties['FullScope']) { $role.FullScope } elseif ($role.PSObject.Properties['Scope']) { $role.Scope } else { $null }
+                            $rdA = if ($role.PSObject.Properties['RoleDefinitionId']) { $role.RoleDefinitionId } else { $null }
+                            if ($rdA -and $rdA -match '/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})') { $rdA = $matches[1] }
+                            if ($fsA -and $rdA) { $activeKeys["$fsA|$rdA"] = $true }
+                        } catch {}
+                    }
                     foreach ($role in $script:AzureRolesCache) {
                         try {
                             $fs = if ($role.PSObject.Properties['FullScope']) { $role.FullScope } elseif ($role.PSObject.Properties['Scope']) { $role.Scope } else { $null }
                             $rd = if ($role.PSObject.Properties['RoleDefinitionId']) { $role.RoleDefinitionId } else { $null }
+                            # Normalize to bare GUID to match override store key format
+                            if ($rd -and $rd -match '/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})') { $rd = $matches[1] }
                             if ($fs -and $rd) {
                                 $key = "$fs|$rd"
                                 if ($script:AzureActiveOverrides.ContainsKey($key)) {
-                                    $ov = $script:AzureActiveOverrides[$key]
-                                    # Mark as Active and set EndDateTime from override
-                                    $role | Add-Member -NotePropertyName Status -NotePropertyValue 'Active' -Force
-                                    if ($ov -and $ov.PSObject.Properties['EndDateTime']) {
-                                        $role | Add-Member -NotePropertyName EndDateTime -NotePropertyValue $ov.EndDateTime -Force
+                                    # Only flip Eligible -> Active; never touch an existing
+                                    # Active row (avoids duplicates once ARM returns the
+                                    # real active assignment schedule).
+                                    if ($role.Status -eq 'Eligible' -and -not $activeKeys.ContainsKey($key)) {
+                                        $ov = $script:AzureActiveOverrides[$key]
+                                        $role | Add-Member -NotePropertyName Status -NotePropertyValue 'Active' -Force
+                                        if ($ov -and $ov.PSObject.Properties['EndDateTime']) {
+                                            $role | Add-Member -NotePropertyName EndDateTime -NotePropertyValue $ov.EndDateTime -Force
+                                        }
                                     }
                                 }
                             }
@@ -689,6 +710,48 @@ function Get-PIMRolesBatch {
                     }
                 }
             } catch { Write-Verbose "Failed to apply Azure active overrides: $($_.Exception.Message)" }
+
+            # Inject synthetic Active entries for any override whose role is missing from the
+            # cache (e.g., delta refresh dropped the eligible entry and ARM hasn't yet surfaced
+            # the active assignment due to RBAC propagation lag).
+            try {
+                if ($script:AzureActiveOverrides -and $script:AzureActiveOverrides.Count -gt 0) {
+                    # Build set of keys currently present in cache
+                    $presentKeys = @{}
+                    foreach ($role in $script:AzureRolesCache) {
+                        try {
+                            $fs = if ($role.PSObject.Properties['FullScope']) { $role.FullScope } elseif ($role.PSObject.Properties['Scope']) { $role.Scope } else { $null }
+                            $rd = if ($role.PSObject.Properties['RoleDefinitionId']) { $role.RoleDefinitionId } else { $null }
+                            if ($rd -and $rd -match '/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})') { $rd = $matches[1] }
+                            if ($fs -and $rd) { $presentKeys["$fs|$rd"] = $true }
+                        } catch {}
+                    }
+                    $injected = 0
+                    foreach ($ovKey in @($script:AzureActiveOverrides.Keys)) {
+                        if ($presentKeys.ContainsKey($ovKey)) { continue }
+                        $ov = $script:AzureActiveOverrides[$ovKey]
+                        if (-not $ov -or -not $ov.PSObject.Properties['RoleSnapshot'] -or -not $ov.RoleSnapshot) { continue }
+                        try {
+                            # Shallow clone snapshot so we don't mutate the original eligible reference
+                            $snap = $ov.RoleSnapshot
+                            $clone = [PSCustomObject]@{}
+                            foreach ($p in $snap.PSObject.Properties) {
+                                $clone | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value -Force
+                            }
+                            $clone | Add-Member -NotePropertyName Status      -NotePropertyValue 'Active' -Force
+                            $clone | Add-Member -NotePropertyName EndDateTime -NotePropertyValue $ov.EndDateTime -Force
+                            if ($ov.PSObject.Properties['FullScope'] -and $ov.FullScope) {
+                                $clone | Add-Member -NotePropertyName FullScope -NotePropertyValue $ov.FullScope -Force
+                                $clone | Add-Member -NotePropertyName Scope     -NotePropertyValue $ov.FullScope -Force
+                            }
+                            $script:AzureRolesCache = @($script:AzureRolesCache + $clone)
+                            $injected++
+                            Write-Verbose "Injected synthetic Active Azure role from override: $ovKey"
+                        } catch { Write-Verbose "Failed to inject synthetic Active role for $ovKey : $($_.Exception.Message)" }
+                    }
+                    if ($injected -gt 0) { $script:AzureRolesCacheTime = Get-Date }
+                }
+            } catch { Write-Verbose "Synthetic override injection failed: $($_.Exception.Message)" }
 
             # Process cached Azure roles and add them to result arrays
             $addedEligibleCount = 0
@@ -879,11 +942,9 @@ function Get-PIMRolesBatch {
                     }
                     $script:AzureRolesCacheTime = Get-Date
 
-                    # Separate eligible and active Azure roles - ensure arrays
-                    $eligibleAzureRoles = @($azureRoles | Where-Object { $_.Status -eq 'Eligible' })
-                    $activeAzureRoles = @($azureRoles | Where-Object { $_.Status -eq 'Active' })
-                    
-                    # Apply any Azure Active overrides before separation to ensure immediate display
+                    # Apply any Azure Active overrides BEFORE separation so freshly activated
+                    # roles (still returned as Eligible by ARM during RBAC propagation) are
+                    # flipped to Active and surfaced in the active list immediately.
                     try {
                         if (-not (Get-Variable -Name 'AzureActiveOverrides' -Scope Script -ErrorAction SilentlyContinue)) { $script:AzureActiveOverrides = @{} }
                         if ($script:AzureActiveOverrides -and $script:AzureActiveOverrides.Count -gt 0) {
@@ -892,6 +953,8 @@ function Get-PIMRolesBatch {
                                 try {
                                     $fs = if ($role.PSObject.Properties['FullScope']) { $role.FullScope } elseif ($role.PSObject.Properties['Scope']) { $role.Scope } else { $null }
                                     $rd = if ($role.PSObject.Properties['RoleDefinitionId']) { $role.RoleDefinitionId } else { $null }
+                                    # Normalize to bare GUID to match override store key format
+                                    if ($rd -and $rd -match '/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})') { $rd = $matches[1] }
                                     if ($fs -and $rd) {
                                         $key = "$fs|$rd"
                                         if ($script:AzureActiveOverrides.ContainsKey($key)) {
@@ -906,6 +969,10 @@ function Get-PIMRolesBatch {
                             }
                         }
                     } catch { Write-Verbose "Failed to apply Azure active overrides pre-separation: $($_.Exception.Message)" }
+
+                    # Separate eligible and active Azure roles - ensure arrays
+                    $eligibleAzureRoles = @($azureRoles | Where-Object { $_.Status -eq 'Eligible' })
+                    $activeAzureRoles   = @($azureRoles | Where-Object { $_.Status -eq 'Active' })
 
                     Write-Verbose "Azure roles separation: $($eligibleAzureRoles.Count) eligible, $($activeAzureRoles.Count) active"
                     if ($azureRoles.Count -gt 0) {
@@ -1037,29 +1104,6 @@ function Get-PIMRolesBatch {
             }
         }
 
-        # Batch fetch authentication contexts if any policies require them
-        $contextIds = @($result.Policies.Values | 
-            Where-Object { $_.RequiresAuthenticationContext -and $_.AuthenticationContextId } | 
-            Select-Object -ExpandProperty AuthenticationContextId -Unique)
-
-        # Ensure we have arrays and handle null/empty cases
-        if (-not $contextIds) {
-            $contextIds = @()
-        }
-        elseif ($contextIds -isnot [array]) {
-            $contextIds = @($contextIds)
-        }
-
-        if ($contextIds.Count -gt 0) {
-            Write-Verbose "Batch fetching $($contextIds.Count) authentication contexts"
-            try {
-                Get-AuthenticationContextsBatch -ContextIds $contextIds -ContextCache $result.AuthenticationContexts
-            }
-            catch {
-                Write-Warning "Failed to batch fetch authentication contexts: $_"
-            }
-        }
-
         # Update progress: Attaching policies
         if ($SplashForm -and -not $SplashForm.IsDisposed) {
             $SplashForm.UpdateStatus("Attaching policies to roles...", 96)
@@ -1121,15 +1165,6 @@ function Get-PIMRolesBatch {
     
         if ($result.Policies.ContainsKey($cacheKey)) {
             $policyInfo = $result.Policies[$cacheKey]
-        
-            # Enhance policy with authentication context details if needed
-            if ($policyInfo.RequiresAuthenticationContext -and $policyInfo.AuthenticationContextId -and 
-                $result.AuthenticationContexts.ContainsKey($policyInfo.AuthenticationContextId)) {
-                $authContext = $result.AuthenticationContexts[$policyInfo.AuthenticationContextId]
-                $policyInfo.AuthenticationContextDisplayName = $authContext.DisplayName
-                $policyInfo.AuthenticationContextDescription = $authContext.Description
-                $policyInfo.AuthenticationContextDetails = $authContext
-            }
         
             # Add PolicyInfo as a property to the role object
             $role | Add-Member -NotePropertyName PolicyInfo -NotePropertyValue $policyInfo -Force
@@ -1654,6 +1689,88 @@ function Get-PIMRolesBatch {
                 }
             }
         }
+
+        # ------------------------------------------------------------------
+        # Synthesize "Entra ID (via Group: <name>)" rows for every role each
+        # ACTIVE PIM group grants, so the user sees what permissions an active
+        # group membership actually delivers. Direct assignments take
+        # precedence: if the same RoleDefinition already exists as a direct
+        # (non-group-attributed) row, we skip synthesis for it. Synthesized
+        # rows are also deduplicated per (RoleDefinitionId, GroupId, Scope).
+        # ------------------------------------------------------------------
+        Write-Verbose "Synthesizing via-Group Entra rows from active group memberships..."
+
+        # Index existing Entra active rows for fast lookup
+        $entraDirectRoleIds = @{}
+        $entraViaGroupKeys = @{}
+        foreach ($er in @($result.ActiveRoles | Where-Object { $_.Type -eq 'Entra' })) {
+            $rid = $er.RoleDefinitionId
+            if (-not $rid) { continue }
+            $isGroupAttr = $false
+            if ($er.PSObject.Properties['IsGroupAttributed']) { $isGroupAttr = [bool]$er.IsGroupAttributed }
+            if (-not $isGroupAttr) {
+                # Direct assignment exists for this role definition (any scope)
+                $entraDirectRoleIds[$rid] = $true
+            }
+            $gid = if ($er.PSObject.Properties['SourceGroupId']) { $er.SourceGroupId } else { $null }
+            $scopeKey = if ($er.PSObject.Properties['DirectoryScopeId']) { $er.DirectoryScopeId } else { '/' }
+            if ($gid) {
+                $entraViaGroupKeys["$rid|$gid|$scopeKey"] = $true
+            }
+        }
+
+        $synthesizedCount = 0
+        foreach ($group in $activeGroupRoles) {
+            if (-not $group.ProvidedRoles -or $group.ProvidedRoles.Count -eq 0) { continue }
+            $groupEndDateTime = $null
+            if ($group.PSObject.Properties['EndDateTime']) { $groupEndDateTime = $group.EndDateTime }
+            $groupId = if ($group.PSObject.Properties['GroupId']) { $group.GroupId } else { $null }
+            $groupName = $group.DisplayName
+
+            foreach ($pr in $group.ProvidedRoles) {
+                $rid = $pr.RoleDefinitionId
+                if (-not $rid) { continue }
+
+                # Direct assignment wins - never duplicate as via-group row
+                if ($entraDirectRoleIds.ContainsKey($rid)) {
+                    Write-Verbose "  Skipping via-group synthesis for '$($pr.DisplayName)' - direct assignment already present"
+                    continue
+                }
+
+                $scopeKey = if ($pr.DirectoryScopeId) { $pr.DirectoryScopeId } else { '/' }
+                $dedupKey = "$rid|$groupId|$scopeKey"
+                if ($entraViaGroupKeys.ContainsKey($dedupKey)) {
+                    Write-Verbose "  Skipping via-group synthesis for '$($pr.DisplayName)' from '$groupName' - already attributed"
+                    continue
+                }
+
+                $synthRole = [PSCustomObject]@{
+                    Type              = 'Entra'
+                    DisplayName       = $pr.DisplayName
+                    Status            = 'Active'
+                    Assignment        = $null
+                    DirectoryScopeId  = $pr.DirectoryScopeId
+                    EndDateTime       = $groupEndDateTime
+                    MemberType        = 'Group'
+                    RoleDefinitionId  = $rid
+                    ResourceName      = "Entra ID (via Group: $groupName)"
+                    Scope             = $pr.ScopeDisplayName
+                    Id                = $rid
+                    ScheduleId        = $null
+                    IsGroupDerived    = $true
+                    IsGroupAttributed = $true
+                    SourceGroup       = $groupName
+                    SourceGroupId     = $groupId
+                    IsSynthesized     = $true
+                }
+
+                $null = $result.ActiveRoles.Add($synthRole)
+                $entraViaGroupKeys[$dedupKey] = $true
+                $synthesizedCount++
+                Write-Verbose "  + Synthesized via-Group row: '$($pr.DisplayName)' via '$groupName' (scope: $($pr.ScopeDisplayName))"
+            }
+        }
+        Write-Verbose "Synthesized $synthesizedCount via-Group Entra row(s) from active group memberships"
     }
 
     # Final progress update

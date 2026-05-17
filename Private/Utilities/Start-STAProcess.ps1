@@ -37,52 +37,47 @@ function Start-STAProcess {
     }
     
     process {
-        # Build parameter string from hashtable
-        $paramString = [System.Collections.ArrayList]::new()
-        
         Write-Verbose "Processing $($Parameters.Count) parameter(s)"
-        foreach ($key in $Parameters.Keys) {
-            if ($Parameters[$key] -is [switch]) {
-                if ($Parameters[$key].IsPresent) {
-                    $null = $paramString.Add("-$key")
-                    Write-Verbose "Added switch parameter: -$key"
-                }
-            }
-            else {
-                $null = $paramString.Add("-$key")
-                $null = $paramString.Add("`"$($Parameters[$key])`"")
-                Write-Verbose "Added parameter: -$key with value '$($Parameters[$key])'"
-            }
-        }
-        
-        # Construct the command to execute
-        $command = "Import-Module PIMActivation -Force; Start-PIMActivation $($paramString -join ' ')"
-        Write-Verbose "Constructed command: $command"
-        
+
         # Verify PowerShell 7 availability
         $psExecutable = "pwsh.exe"
         Write-Verbose "Checking for PowerShell 7 executable: $psExecutable"
-        
+
         $psPath = Get-Command $psExecutable -ErrorAction SilentlyContinue
         if (-not $psPath) {
             $errorMessage = "PowerShell 7 (pwsh.exe) not found. Please install PowerShell 7+ from https://aka.ms/powershell"
             Write-Error $errorMessage
             throw $errorMessage
         }
-        
+
         Write-Verbose "Found PowerShell 7 at: $($psPath.Source)"
-        
+
+        # Serialize parameters via PSSerializer so no user-supplied string is
+        # ever interpolated into the child shell's command line. The child
+        # decodes the base64 blob and splats the resulting hashtable.
+        $serialized = [System.Management.Automation.PSSerializer]::Serialize($Parameters)
+        $paramsB64  = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($serialized))
+
+        $childScript = @"
+`$xml    = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('$paramsB64'))
+`$params = [System.Management.Automation.PSSerializer]::Deserialize(`$xml)
+Import-Module PIMActivation -Force
+Start-PIMActivation @params
+"@
+
+        $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($childScript))
+
         # Launch the STA process
         try {
             Write-Verbose "Launching PowerShell 7 process in STA mode"
-            Start-Process $psExecutable -ArgumentList @(
+            Start-Process $psPath.Source -ArgumentList @(
                 '-Sta',
                 '-ExecutionPolicy', 'Bypass',
                 '-NoProfile',
                 '-WindowStyle', 'Hidden',
-                '-Command', $command
+                '-EncodedCommand', $encoded
             ) -NoNewWindow
-            
+
             Write-Verbose "Successfully launched STA process"
         }
         catch {

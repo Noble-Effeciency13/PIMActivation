@@ -133,7 +133,7 @@ function New-PIMActiveRolesPanel {
                 foreach ($item in $sender.Items) {
                     if ($item -is [System.Windows.Forms.ListViewItem]) {
                         $role = $item.Tag
-                        $deactivatable = ($role -and $role.PSObject.Properties['EndDateTime'] -and $role.EndDateTime)
+                        $deactivatable = ($role -and $role.PSObject.Properties['EndDateTime'] -and $role.EndDateTime -and (-not ($role.PSObject.Properties['MemberType'] -and $role.MemberType -in @('Group','Inherited'))))
                         if ($deactivatable) {
                             $hasDeactivatable = $true
                             if (-not $item.Checked) {
@@ -149,7 +149,7 @@ function New-PIMActiveRolesPanel {
                     foreach ($item in $sender.Items) {
                         if ($item -is [System.Windows.Forms.ListViewItem]) {
                             $role = $item.Tag
-                            $deactivatable = ($role -and $role.PSObject.Properties['EndDateTime'] -and $role.EndDateTime)
+                            $deactivatable = ($role -and $role.PSObject.Properties['EndDateTime'] -and $role.EndDateTime -and (-not ($role.PSObject.Properties['MemberType'] -and $role.MemberType -in @('Group','Inherited'))))
                             if ($deactivatable) {
                                 $item.Checked = $newState
                             }
@@ -184,7 +184,7 @@ function New-PIMActiveRolesPanel {
             foreach ($item in $lv.Items) {
                 if ($item -is [System.Windows.Forms.ListViewItem]) {
                     $role = $item.Tag
-                    $deactivatable = ($role -and $role.PSObject.Properties['EndDateTime'] -and $role.EndDateTime)
+                    $deactivatable = ($role -and $role.PSObject.Properties['EndDateTime'] -and $role.EndDateTime -and (-not ($role.PSObject.Properties['MemberType'] -and $role.MemberType -in @('Group','Inherited'))))
                     if ($deactivatable) {
                         $hasDeactivatable = $true
                         if (-not $item.Checked) {
@@ -200,7 +200,7 @@ function New-PIMActiveRolesPanel {
                 foreach ($item in $lv.Items) {
                     if ($item -is [System.Windows.Forms.ListViewItem]) {
                         $role = $item.Tag
-                        $deactivatable = ($role -and $role.PSObject.Properties['EndDateTime'] -and $role.EndDateTime)
+                        $deactivatable = ($role -and $role.PSObject.Properties['EndDateTime'] -and $role.EndDateTime -and (-not ($role.PSObject.Properties['MemberType'] -and $role.MemberType -in @('Group','Inherited'))))
                         if ($deactivatable) {
                             $item.Checked = $newState
                         }
@@ -226,7 +226,7 @@ function New-PIMActiveRolesPanel {
             foreach ($item in $sender.Items) {
                 if ($item -is [System.Windows.Forms.ListViewItem]) {
                     $role = $item.Tag
-                    $deactivatable = ($role -and $role.PSObject.Properties['EndDateTime'] -and $role.EndDateTime)
+                    $deactivatable = ($role -and $role.PSObject.Properties['EndDateTime'] -and $role.EndDateTime -and (-not ($role.PSObject.Properties['MemberType'] -and $role.MemberType -in @('Group','Inherited'))))
                     if ($deactivatable) {
                         $hasDeactivatable = $true
                         if ($item.Checked) {

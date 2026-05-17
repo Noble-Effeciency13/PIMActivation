@@ -5,21 +5,25 @@ function Start-PIMActivation {
     
     .DESCRIPTION
         Launches a Windows Forms application for managing Privileged Identity Management (PIM) role activations.
-        The application provides an intuitive interface for activating Entra ID roles and PIM-enabled groups
-        with sophisticated handling of duplicate role assignments from multiple sources.
+        The application provides an intuitive interface for activating Entra ID roles, PIM-enabled groups,
+        and Azure Resource roles with sophisticated handling of duplicate role assignments from multiple sources.
         
         Key Features:
         - 85% faster loading through batch API operations
         - Smart duplicate role handling showing correct group attribution
+        - Activation profiles for reusable role combinations
+        - Azure Resource reduced-scope activation picker
+        - Persistent policy metadata cache for faster repeat launches
+        - Authentication context batching where roles share the same context requirement
         - Visual indication of role sources (Direct vs Group-derived)
         - Automatic handling of authentication and module dependencies
         
         Requirements:
         - PowerShell 7.0 or later
         - Single-threaded apartment (STA) mode for Windows Forms
-        - Microsoft Graph PowerShell modules (auto-installed if missing)
+        - Microsoft Graph PowerShell modules available at module import time
         
-        The tool automatically handles authentication, module dependencies, and provides a loading 
+        The tool automatically handles authentication, imports validated modules, and provides a loading
         interface with progress tracking during initialization.
     
     .PARAMETER IncludeEntraRoles
@@ -36,8 +40,8 @@ function Start-PIMActivation {
     
     .PARAMETER IncludeAzureResources
         Include Azure resource roles (RBAC) in the activation interface.
-        NOTE: This feature is planned for version 2.0.0 and is not yet implemented.
-        The parameter is accepted but will display a warning message.
+        When enabled, displays eligible and active Azure Resource PIM assignments across accessible
+        subscriptions and supports Azure Resource activation, deactivation, policy detection, and reduced scope.
         Default: $false
     
     .PARAMETER Verbose
@@ -65,10 +69,10 @@ function Start-PIMActivation {
     .NOTES
         Name: Start-PIMActivation
         Author: Sebastian Flæng Markdanner
-        Version: 1.2.1
+        Version: 2.2.0
         
         This function requires PowerShell 7+ and will automatically restart in STA mode if needed.
-        Missing required modules are automatically installed from the PowerShell Gallery.
+        Required Graph and Azure modules are validated and loaded when the module is imported.
         
         The function maintains session state for account switching and can restart itself
         when users need to switch between different Microsoft accounts.
@@ -91,10 +95,10 @@ function Start-PIMActivation {
         [Parameter(HelpMessage = "Include Azure resource roles in the activation interface")]
         [switch]$IncludeAzureResources,
         
-        [Parameter(HelpMessage = "Skip confirmation prompts for automatic dependency resolution")]
+        [Parameter(HelpMessage = "Force module reinitialization if import-time dependency validation must be retried")]
         [switch]$Force,
         
-        [Parameter(HelpMessage = "Disable automatic dependency resolution and require manual intervention")]
+        [Parameter(HelpMessage = "Deprecated compatibility switch; dependency validation happens at module import")]
         [switch]$ManualDependencyCheck,
 
         [Parameter(HelpMessage = "Client ID of the app registration to use for Graph auth")]
@@ -149,78 +153,20 @@ begin {
         throw $errorMessage
     }
 
-    # Only run the full dependency check/resolve when modules were not already imported
-    # at module-load time (i.e. $script:DependenciesValidated = $false means they still need installing)
-    if (-not $script:DependenciesValidated) {
-        try {
-            # Validate module dependencies before proceeding
-            $dependencyTest = Test-PIMDependencies
-            if (-not $dependencyTest.ReadyForActivation) {
-                Write-Error "Required module dependencies are missing or incorrect. Please resolve dependencies before proceeding." -Category InvalidOperation
-                return
-            }
+    if ($ManualDependencyCheck) {
+        Write-Verbose "ManualDependencyCheck is deprecated; dependency validation now happens at module import."
+    }
 
-            # Check if user wants to proceed with starting the PIM activation tool
-            if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
-                Write-Verbose "Operation cancelled by user"
-                return
-            }
-
-            # Automatic dependency resolution with minimal output
-            if (-not $ManualDependencyCheck) {
-                Write-Verbose "Performing automatic dependency resolution..."
-                $dependencyResult = Resolve-PIMDependencies -Force:$Force
-
-                if (-not $dependencyResult.Success) {
-                    Write-Error "Dependency resolution failed: $($dependencyResult.Errors -join '; ')" -Category OperationStopped
-                    return
-                }
-
-                Write-Verbose "All dependencies resolved automatically"
-            }
-            else {
-                # Manual dependency checking (minimal output mode)
-                Write-Verbose "Checking PIM dependencies manually..."
-                $dependencyCheck = Test-PIMDependencies
-
-                if (-not $dependencyCheck.ReadyForActivation) {
-                    switch ($dependencyCheck.OverallStatus) {
-                        'Version-Conflicts' {
-                            Write-Warning "Version conflicts detected. This may cause assembly loading errors."
-                            Write-Host "`nTo resolve conflicts automatically:" -ForegroundColor Yellow
-                            Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
-                            return
-                        }
-                        'Missing-Dependencies' {
-                            Write-Warning "Missing required dependencies."
-                            Write-Host "`nTo resolve dependencies automatically:" -ForegroundColor Yellow
-                            Write-Host "Run: Start-PIMActivation -Force" -ForegroundColor White
-                            return
-                        }
-                        default {
-                            Write-Warning "Dependency check failed: $($dependencyCheck.OverallStatus)"
-                            return
-                        }
-                    }
-                }
-
-                Write-Verbose "Dependencies verified successfully"
-            }
-        }
-        catch {
-            Write-Error "Failed to initialize PIM Activation: $($_.Exception.Message)" -Category OperationStopped
-            throw
-        }
+    if ($script:DependenciesValidated) {
+        Write-Verbose "Module dependencies already validated at import time."
     }
     else {
-        # Modules were already imported when the PIMActivation module was loaded – no work needed
-        Write-Verbose "Module dependencies already validated at import time – skipping dependency check"
+        Write-Verbose "Import-time dependency validation did not complete; Start-PIMActivation will retry module imports during startup."
+    }
 
-        # ShouldProcess still needs to run (WhatIf / Confirm support)
-        if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
-            Write-Verbose "Operation cancelled by user"
-            return
-        }
+    if (-not $PSCmdlet.ShouldProcess("PIM Activation Tool", "Start PIM role activation interface")) {
+        Write-Verbose "Operation cancelled by user"
+        return
     }
 
     # Configure execution preferences
@@ -262,11 +208,7 @@ begin {
             # Ensure Single-Threaded Apartment mode for Windows Forms
             if (-not (Test-STAMode)) {
                 Write-Verbose "Restarting in STA mode for Windows Forms compatibility"
-                return Start-STAProcess -ScriptBlock {
-                    param($ModulePath, $Params)
-                    Import-Module $ModulePath -Force
-                    Start-PIMActivation @Params
-                } -ArgumentList @($PSScriptRoot, $PSBoundParameters)
+                return Start-STAProcess -Parameters $PSBoundParameters
             }
             
             # Store parameters for potential restart scenarios (account switching)
@@ -287,57 +229,43 @@ begin {
             Start-Sleep -Milliseconds 200
             
             try {
-                # Initialize PIM modules
-                # When DependenciesValidated = $true the Graph modules were already imported at
-                # module-load time; we only need to handle Az modules here if requested.
+                # Dependencies are normally preloaded when PIMActivation is imported. Retry here only
+                # if import-time validation failed.
                 if (-not $script:DependenciesValidated) {
-                    Write-Verbose "Validating and importing required PowerShell modules"
-                    Update-LoadingStatus -SplashForm $splashForm -Status "Initializing PIM modules..." -Progress 30
+                    $moduleStatus = "Loading dependencies..."
+                    Write-Verbose $moduleStatus
+                    Update-LoadingStatus -SplashForm $splashForm -Status $moduleStatus -Progress 30
 
-                    $moduleParams = @{ Verbose = $script:UserVerbose }
-                    if ($IncludeAzureResources) { $moduleParams.IncludeAzureModules = $true }
+                    $moduleParams = @{}
+                    if ($Force) { $moduleParams.Force = $true }
+                    $moduleParams.IncludeAzureModules = $true
 
                     $moduleResult = Initialize-PIMModules @moduleParams
                     if (-not $moduleResult.Success) {
-                        throw "Module initialization failed: $($moduleResult.Error)"
+                        throw "Required module initialization failed: $($moduleResult.Error)"
                     }
 
-                    # Import Graph modules now that they are validated
                     foreach ($mod in @(
                         'Microsoft.Graph.Authentication',
                         'Microsoft.Graph.Identity.DirectoryManagement',
                         'Microsoft.Graph.Identity.Governance',
                         'Microsoft.Graph.Identity.SignIns',
                         'Microsoft.Graph.Groups',
-                        'Microsoft.Graph.Users'
+                        'Microsoft.Graph.Users',
+                        'Az.Accounts',
+                        'Az.Resources'
                     )) {
-                        $null = Import-PIMModule -ModuleName $mod
+                        if (-not (Import-PIMModule -ModuleName $mod -Force:$Force)) {
+                            throw "Failed to load required module: $mod"
+                        }
                     }
-
-                    if ($IncludeAzureResources) {
-                        $null = Import-PIMModule -ModuleName 'Az.Accounts'
-                        $null = Import-PIMModule -ModuleName 'Az.Resources'
-                    }
-
                     $script:DependenciesValidated = $true
                 }
-                elseif ($IncludeAzureResources) {
-                    # Graph modules already in-session; only load the optional Az modules
-                    Write-Verbose "Loading Azure PowerShell modules"
-                    Update-LoadingStatus -SplashForm $splashForm -Status "Loading Azure modules..." -Progress 30
-
-                    $azResult = Initialize-PIMModules -IncludeAzureModules
-                    if (-not $azResult.Success) {
-                        throw "Azure module initialization failed: $($azResult.Error)"
-                    }
-                    $null = Import-PIMModule -ModuleName 'Az.Accounts'
-                    $null = Import-PIMModule -ModuleName 'Az.Resources'
-                }
                 else {
-                    # All required modules already loaded at Import-Module time
-                    Write-Verbose "Graph modules pre-loaded – skipping module initialization"
-                    Update-LoadingStatus -SplashForm $splashForm -Status "Modules ready..." -Progress 30
+                    Write-Verbose "Dependencies pre-loaded at import time; startup module loading skipped"
                 }
+
+                Update-LoadingStatus -SplashForm $splashForm -Status "Modules ready..." -Progress 30
                 
                 # Establish service connections
                 Write-Verbose "Connecting to Microsoft services"
@@ -371,6 +299,17 @@ begin {
                 # Store connection context for session management
                 $script:CurrentUser = $connectionResult.CurrentUser
                 $script:GraphContext = $connectionResult.GraphContext
+
+                try {
+                    Update-LoadingStatus -SplashForm $splashForm -Status "Loading cached policy metadata..." -Progress 74
+                    $policyCacheImport = Import-PIMPolicyCache
+                    if ($policyCacheImport -and $policyCacheImport.PolicyCount -gt 0) {
+                        Write-Verbose "Loaded cached policy metadata: $($policyCacheImport.PolicyCount) policies"
+                    }
+                }
+                catch {
+                    Write-Verbose "Persistent policy cache load skipped: $($_.Exception.Message)"
+                }
                 
                 # Initialize main application form
                 Write-Verbose "Building main application interface"

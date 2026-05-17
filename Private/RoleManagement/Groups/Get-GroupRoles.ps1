@@ -85,6 +85,7 @@ function Get-GroupRoles {
                             StartDateTime    = $membership.StartDateTime
                             EndDateTime      = $membership.EndDateTime
                             MemberType       = $membership.AccessId
+                            AccessId         = $membership.AccessId
                             DirectoryScopeId = $null
                             PrincipalId      = $membership.PrincipalId
                             Assignment       = $membership
@@ -128,6 +129,7 @@ function Get-GroupRoles {
                             StartDateTime    = $membership.StartDateTime
                             EndDateTime      = $membership.EndDateTime
                             MemberType       = $membership.AccessId
+                            AccessId         = $membership.AccessId
                             DirectoryScopeId = $null
                             PrincipalId      = $membership.PrincipalId
                             Assignment       = $membership

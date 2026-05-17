@@ -1,4 +1,40 @@
 function Get-RoleActivationParameters {
+    <#
+    .SYNOPSIS
+        Builds role activation request parameters for Microsoft Graph and Azure Resource PIM.
+
+    .DESCRIPTION
+        Creates the scheduleInfo and role-specific payload fields needed to submit PIM activation
+        requests. The function supports immediate and scheduled activations by accepting an optional
+        local start time and converting it to the UTC timestamp format expected by Graph and ARM.
+
+    .PARAMETER RoleData
+        Role metadata for the selected Entra, Group, or Azure Resource role.
+
+    .PARAMETER Justification
+        Justification text to include with the activation request.
+
+    .PARAMETER EffectiveDuration
+        Hashtable containing the duration after policy maximums have been applied.
+
+    .PARAMETER TicketInfo
+        Optional ticket metadata when the role policy requires ticketing.
+
+    .PARAMETER ScheduleStartTime
+        Optional local date and time when the activation should start. When omitted, the request
+        starts immediately.
+
+    .PARAMETER AzureTargetScope
+        Optional reduced Azure Resource scope to use for Azure role activation.
+
+    .PARAMETER LinkedRoleEligibilityScheduleId
+        Optional Azure eligibility schedule ID required when activating at a reduced scope.
+
+    .OUTPUTS
+        Hashtable
+        Returns a Graph-compatible activation hashtable, or an Azure Resource activation hashtable
+        for Azure Resource roles.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -12,17 +48,28 @@ function Get-RoleActivationParameters {
         
         [hashtable]$TicketInfo,
 
+        [datetime]$ScheduleStartTime,
+
         [string]$AzureTargetScope,
 
         [string]$LinkedRoleEligibilityScheduleId
     )
+
+    $activationStartDateTime = if ($PSBoundParameters.ContainsKey('ScheduleStartTime')) { [datetime]$ScheduleStartTime } else { Get-Date }
+    if ($activationStartDateTime.Kind -eq [System.DateTimeKind]::Unspecified) {
+        $activationStartDateTime = [datetime]::SpecifyKind($activationStartDateTime, [System.DateTimeKind]::Local)
+    }
+    else {
+        $activationStartDateTime = $activationStartDateTime.ToLocalTime()
+    }
+    $activationStartDateTimeUtc = $activationStartDateTime.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
     
     $activationParams = @{
         action        = "selfActivate"
         justification = $Justification
         principalId   = $script:CurrentUser.Id
         scheduleInfo  = @{
-            startDateTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
+            startDateTime = $activationStartDateTimeUtc
             expiration    = @{
                 duration = "PT$($EffectiveDuration.Hours)H$($EffectiveDuration.Minutes)M"
                 type     = "afterDuration"
@@ -38,8 +85,31 @@ function Get-RoleActivationParameters {
         }
         
         'Group' {
+            $groupAccessCandidates = @()
+            if ($RoleData.PSObject.Properties['AccessId'] -and $RoleData.AccessId) {
+                $groupAccessCandidates += $RoleData.AccessId
+            }
+            if ($RoleData.PSObject.Properties['Assignment'] -and $RoleData.Assignment -and $RoleData.Assignment.PSObject.Properties['AccessId'] -and $RoleData.Assignment.AccessId) {
+                $groupAccessCandidates += $RoleData.Assignment.AccessId
+            }
+            if ($RoleData.PSObject.Properties['MemberType'] -and $RoleData.MemberType) {
+                $groupAccessCandidates += $RoleData.MemberType
+            }
+            if ($RoleData.PSObject.Properties['MembershipType'] -and $RoleData.MembershipType) {
+                $groupAccessCandidates += $RoleData.MembershipType
+            }
+
+            $groupAccessId = 'member'
+            foreach ($candidate in $groupAccessCandidates) {
+                $normalizedAccessId = ([string]$candidate).Trim().ToLowerInvariant()
+                if ($normalizedAccessId -in @('member', 'owner')) {
+                    $groupAccessId = $normalizedAccessId
+                    break
+                }
+            }
+
             $activationParams.groupId = $RoleData.GroupId
-            $activationParams.accessId = "member"
+            $activationParams.accessId = $groupAccessId
         }
         
         'AzureResource' {
@@ -102,7 +172,7 @@ function Get-RoleActivationParameters {
                 RequestType                     = 'SelfActivate'
                 Justification                   = $Justification
                 ScheduleInfo                    = @{
-                    StartDateTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
+                    StartDateTime = $activationStartDateTimeUtc
                     Expiration    = @{
                         Type     = 'AfterDuration'
                         Duration = "PT$($EffectiveDuration.Hours)H$($EffectiveDuration.Minutes)M"

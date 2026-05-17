@@ -4,8 +4,8 @@ function Import-PIMModule {
         Imports a specific PIM module with version checking and conflict removal
     
     .DESCRIPTION
-        Just-in-time module loading function that ensures only the correct version
-        of a module is loaded and removes any conflicting versions from the session.
+        Module loading function that ensures only a compatible version of a module is loaded and removes
+        any conflicting versions from the session.
     
     .PARAMETER ModuleName
         Name of the module to import
@@ -39,7 +39,7 @@ function Import-PIMModule {
         $requiredVersionString = $script:RequiredModuleVersions[$ModuleName]
         $minVersion = $null
         if ($requiredVersionString) {
-            # RequiredModuleVersions holds minimums for Azure when IncludeAzureModules was used
+            # RequiredModuleVersions holds module minimums initialized by Initialize-PIMModules.
             $minVersion = [Version]$requiredVersionString
         }
 

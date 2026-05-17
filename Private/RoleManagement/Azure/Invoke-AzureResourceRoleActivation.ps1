@@ -19,7 +19,7 @@ function Invoke-AzureResourceRoleActivation {
         Justification text for the activation.
     
     .PARAMETER ScheduleInfo
-        Schedule information including start time and expiration.
+        Schedule information including the UTC start time and expiration.
     
     .PARAMETER TicketInfo
         Optional ticket information if required by policy.
@@ -100,6 +100,19 @@ function Invoke-AzureResourceRoleActivation {
         if ($ScheduleInfo.Expiration -and $ScheduleInfo.Expiration.Type) {
             $activationParams.ExpirationType = $ScheduleInfo.Expiration.Type
         }
+
+        if ($ScheduleInfo.StartDateTime) {
+            try {
+                $activationParams.ScheduleInfoStartDateTime = [System.DateTimeOffset]::Parse(
+                    [string]$ScheduleInfo.StartDateTime,
+                    [System.Globalization.CultureInfo]::InvariantCulture,
+                    [System.Globalization.DateTimeStyles]::AssumeUniversal
+                ).UtcDateTime
+            }
+            catch {
+                $activationParams.ScheduleInfoStartDateTime = [datetime]$ScheduleInfo.StartDateTime
+            }
+        }
         
         # Add ticket information if provided using correct parameter names
         if ($TicketInfo -and $TicketInfo.TicketNumber) {
@@ -116,7 +129,7 @@ function Invoke-AzureResourceRoleActivation {
         
         Write-Verbose "Submitting Azure Resource role activation using New-AzRoleAssignmentScheduleRequest"
         Write-Verbose "Parameters: Name=$requestName, Scope=$Scope, RoleDefinitionId=$RoleDefinitionId, PrincipalId=$PrincipalId"
-        Write-Verbose "RequestType=$RequestType, ExpirationDuration=$($ScheduleInfo.Expiration.Duration)"
+        Write-Verbose "RequestType=$RequestType, StartDateTime=$($ScheduleInfo.StartDateTime), ExpirationDuration=$($ScheduleInfo.Expiration.Duration)"
         
         # Use the Az.Resources cmdlet to activate the role
         $response = New-AzRoleAssignmentScheduleRequest @activationParams -ErrorAction Stop

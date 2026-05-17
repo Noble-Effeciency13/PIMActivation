@@ -5,7 +5,7 @@ function Connect-PIMServices {
 
     .DESCRIPTION
         Creates authenticated connections to Microsoft services based on the specified role types.
-        Uses just-in-time module loading with version pinning to ensure compatibility.
+        Uses import-time module loading with version pinning to ensure compatibility.
         Handles Microsoft Graph authentication for Entra ID roles and groups, and Azure Resource Manager
         authentication for Azure resource roles. Also ensures Azure context is reset and re-scoped when
         switching accounts so Azure roles are correctly discovered for the active identity.
@@ -83,18 +83,23 @@ function Connect-PIMServices {
     }
 
     try {
-        # Initialize/pin modules needed for Graph/Az
-        $moduleInit = Initialize-PIMModules
-        if (-not $moduleInit.Success) {
-            $result.Error = "Failed to initialize PIM modules: $($moduleInit.Error)"
-            return $result
+        $needsDependencyRetry = -not ((Get-Variable -Name 'DependenciesValidated' -Scope Script -ErrorAction SilentlyContinue) -and $script:DependenciesValidated) -or
+            -not $script:RequiredModuleVersions.ContainsKey('Az.Accounts') -or
+            -not $script:RequiredModuleVersions.ContainsKey('Az.Resources')
+
+        if ($needsDependencyRetry) {
+            $moduleInit = Initialize-PIMModules -IncludeAzureModules
+            if (-not $moduleInit.Success) {
+                $result.Error = "Failed to initialize PIM modules: $($moduleInit.Error)"
+                return $result
+            }
         }
 
         # --- Microsoft Graph ---
         if ($IncludeEntraRoles -or $IncludeGroups -or $IncludeAzureResources) {
             Write-Verbose "Initializing Microsoft Graph connection..."
 
-            # JIT load Graph modules
+            # Ensure required modules are loaded; these are normally preloaded at module import.
             _UpdateStatus "Loading modules..." 40
             if (-not (Import-PIMModule -ModuleName 'Microsoft.Graph.Authentication')) {
                 $result.Error = "Failed to load Microsoft.Graph.Authentication"
@@ -117,11 +122,20 @@ function Connect-PIMServices {
                     $result.Error = "Failed to load Microsoft.Graph.Users"
                     return $result
                 }
+                if (-not (Import-PIMModule -ModuleName 'Microsoft.Graph.Identity.SignIns')) {
+                    $result.Error = "Failed to load Microsoft.Graph.Identity.SignIns"
+                    return $result
+                }
+            }
+            if ($IncludeGroups) {
+                if (-not (Import-PIMModule -ModuleName 'Microsoft.Graph.Groups')) {
+                    $result.Error = "Failed to load Microsoft.Graph.Groups"
+                    return $result
+                }
             }
 
-            # JIT load Az before any auth if Azure is requested
             if ($IncludeAzureResources) {
-                Write-Verbose "Importing Az.Accounts and Az.Resources modules before authentication"
+                Write-Verbose "Ensuring Az.Accounts and Az.Resources are loaded before authentication"
                 _UpdateStatus "Loading Azure modules..." 50
                 if (-not (Import-PIMModule -ModuleName 'Az.Accounts')) {
                     $result.Error = "Failed to load Az.Accounts"

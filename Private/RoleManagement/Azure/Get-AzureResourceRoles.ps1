@@ -1,50 +1,69 @@
 ﻿function Get-AzureResourceRoles {
     <#
     .SYNOPSIS
-        Retrieves Azure resource PIM-eligible and active roles for a user using the ARM root-scope endpoint.
+        Retrieves Azure Resource PIM eligible and active roles for the calling user
+        using the ARM root-scope endpoints with the asTarget() filter.
 
     .DESCRIPTION
-        Uses the ARM Management API at root scope ("/") with a principalId filter to enumerate all
-        role eligibility schedules and role assignment schedules for the signed-in user.
-        This approach does NOT require any standing Azure RBAC permissions – it relies only on the
-        user being able to read their own assignments, which the ARM API permits unconditionally.
+        Calls the ARM PIM schedule-instance endpoints at the root tenant scope
+        ("/providers/Microsoft.Authorization/...") with the $filter=asTarget()
+        clause. asTarget() returns every PIM eligibility (or activation) the
+        calling user holds tenant-wide - across management groups, subscriptions,
+        resource groups, and individual resources - without requiring any
+        pre-existing Azure role at the queried scope (avoids the historic
+        Azure Resource PIM catch-22 where principalId filtering required
+        Microsoft.Authorization/roleAssignments/read at the scope).
 
-        Role definition display names and scope display names (subscription/MG names) are resolved
-        lazily and cached for the duration of the call.
+        Two endpoints are used:
+            * roleEligibilityScheduleInstances - eligible (PIM) assignments
+            * roleAssignmentScheduleInstances  - currently active assignments
+              (both PIM-activated and permanent role assignments that ARM has
+              materialized as schedule instances)
+
+        Display names for role definitions, subscriptions, and management
+        groups are resolved on demand through ARM REST so that Az.Resources
+        is not required.
 
     .PARAMETER UserId
-        The user principal name (UPN) used to establish the Az context if one is not already present.
+        UPN of the user. Used to (re)establish the Az context if necessary.
 
     .PARAMETER UserObjectId
-        The Azure AD object ID of the user.  Used as the principalId filter in ARM REST calls.
+        Azure AD object ID of the user. Used to classify Direct vs Inherited
+        assignments returned by asTarget().
 
     .PARAMETER IncludeActive
-        When specified, queries roleAssignmentSchedules at root scope.
+        Include active (currently-assigned) Azure Resource roles.
 
     .PARAMETER IncludeEligible
-        When specified, queries roleEligibilitySchedules at root scope.
+        Include eligible (PIM) Azure Resource roles.
 
     .PARAMETER SubscriptionIds
-        Optional.  When provided, only roles whose scope matches one of these subscription IDs are
-        returned.  Used by the delta-refresh path to limit results to recently activated scopes.
+        Optional client-side filter. When provided, results are limited to
+        scopes under any of the supplied subscription IDs (or matching
+        management-group / tenant scopes are kept as-is).
 
     .PARAMETER OnlyDirtyManagementGroups
-        When set, only returns roles scoped to management groups listed in
-        $script:DirtyManagementGroups.  Used by the delta-refresh path for MG activation events.
+        Reserved for delta-refresh callers. Currently a no-op for the
+        root-scope endpoint because asTarget() already returns everything
+        the user can see in one call.
 
     .PARAMETER DisableParallelProcessing
-        Accepted for backward-compatibility; not used in this implementation (no subscription loop).
+        Reserved for backward compatibility with prior implementations.
+        Has no effect on the root-scope endpoint (single ARM call per
+        endpoint, paginated).
 
     .PARAMETER ThrottleLimit
-        Accepted for backward-compatibility; not used in this implementation.
+        Reserved for backward compatibility. Unused.
 
     .EXAMPLE
-        Get-AzureResourceRoles -UserId "user@domain.com" -UserObjectId "12345678-..." -IncludeEligible -IncludeActive
+        Get-AzureResourceRoles -UserId 'user@contoso.com' -UserObjectId '...' -IncludeEligible -IncludeActive
 
     .NOTES
-        Requires Az.Accounts (for Get-AzContext / Connect-AzAccount / token acquisition).
-        Does NOT require Az.Resources.
-        ARM API version: 2020-10-01 for PIM schedule endpoints.
+        Requires Az.Accounts (for Get-AzContext / Connect-AzAccount / token
+        acquisition). Az.Resources is not required.
+        ARM API versions:
+            * Schedule instances : 2020-10-01
+            * Role definitions   : 2022-04-01
     #>
     [CmdletBinding()]
     param(
@@ -63,423 +82,360 @@
         [int]$ThrottleLimit = 10
     )
 
-    Write-Verbose "Get-AzureResourceRoles: using ARM root-scope query for principal $UserObjectId"
+    Write-Verbose "Get-AzureResourceRoles: using ARM root-scope query with asTarget() for principal $UserObjectId"
 
-    # ── 1. Ensure Azure context ──────────────────────────────────────────────
+    if (-not $IncludeActive -and -not $IncludeEligible) {
+        Write-Verbose "Neither IncludeActive nor IncludeEligible specified - nothing to fetch"
+        return @()
+    }
+
+    # OnlyDirtyManagementGroups is a no-op for the root-scope endpoint - asTarget()
+    # already returns everything the principal can see across MGs in one call.
+    if ($OnlyDirtyManagementGroups) {
+        Write-Verbose "OnlyDirtyManagementGroups is a no-op for the ARM root-scope endpoint; returning empty"
+        return @()
+    }
+
+    # ----- 1. Ensure Azure context --------------------------------------------------
     try {
         $azContext = Get-AzContext -ErrorAction SilentlyContinue
         if (-not $azContext) {
-            Write-Verbose "No Az context – connecting as $UserId"
+            Write-Verbose "No Az context - connecting as $UserId"
             Connect-AzAccount -AccountId $UserId -ErrorAction Stop | Out-Null
             $azContext = Get-AzContext -ErrorAction Stop
         }
         elseif ($azContext.Account.Id -ne $UserId -and $azContext.Account.Id -ne $UserObjectId) {
-            Write-Verbose "Az context mismatch – reconnecting as $UserId"
+            Write-Verbose "Az context mismatch - reconnecting as $UserId"
             Connect-AzAccount -AccountId $UserId -ErrorAction Stop | Out-Null
             $azContext = Get-AzContext -ErrorAction Stop
         }
     }
     catch {
-        throw "Failed to establish Azure context: $($_.Exception.Message)"
+        Write-Warning "Failed to establish Azure context: $($_.Exception.Message)"
+        return @()
     }
 
-    # ── 2. Acquire ARM bearer token ──────────────────────────────────────────
+    # ----- 2. Acquire ARM bearer token ---------------------------------------------
+    $armToken = $null
+    $headers  = $null
     try {
-        $tokenObj = Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -ErrorAction Stop
+        try {
+            $tokenObj = Get-AzAccessToken -ResourceUrl 'https://management.azure.com/' -ErrorAction Stop
+            if ($tokenObj.Token -is [System.Security.SecureString]) {
+                $armToken = [System.Net.NetworkCredential]::new('', $tokenObj.Token).Password
+            }
+            elseif ($tokenObj.Token -is [string] -and $tokenObj.Token.Length -gt 0) {
+                $armToken = $tokenObj.Token
+            }
+            else {
+                $secureToken = (Get-AzAccessToken -ResourceUrl 'https://management.azure.com/' -AsSecureString -ErrorAction Stop).Token
+                $armToken    = [System.Net.NetworkCredential]::new('', $secureToken).Password
+            }
+            if ([string]::IsNullOrEmpty($armToken)) { throw 'Token was null or empty after extraction.' }
+        }
+        catch {
+            Write-Warning "Failed to acquire ARM access token: $($_.Exception.Message)"
+            return @()
+        }
 
-        # Az.Accounts 2.13+ returns a SecureString; older versions return plain string
-        if ($tokenObj.Token -is [System.Security.SecureString]) {
-            $armToken = [System.Net.NetworkCredential]::new('', $tokenObj.Token).Password
-        }
-        elseif ($tokenObj.Token -is [string] -and $tokenObj.Token.Length -gt 0) {
-            $armToken = $tokenObj.Token
-        }
-        else {
-            # Fallback: Az.Accounts 2.17+ supports -AsSecureString explicitly
-            $secureToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -AsSecureString -ErrorAction Stop).Token
-            $armToken = [System.Net.NetworkCredential]::new('', $secureToken).Password
+        $headers = @{
+            'Authorization' = "Bearer $armToken"
+            'Content-Type'  = 'application/json'
         }
 
-        if ([string]::IsNullOrEmpty($armToken)) {
-            throw "Token was null or empty after extraction."
+        # ----- 3. Display-name caches ----------------------------------------------
+        $roleDefCache = @{}
+        $subNameCache = @{}
+        $mgNameCache  = @{}
+
+        # ----- 4. Helpers ----------------------------------------------------------
+
+        # Paginate a single ARM list endpoint and return all items.
+        $invokeArmList = {
+            param([string]$Uri)
+            $items   = [System.Collections.ArrayList]::new()
+            $nextUri = $Uri
+            while ($nextUri) {
+                try {
+                    $resp = Invoke-RestMethod -Uri $nextUri -Headers $headers -Method Get -ErrorAction Stop
+                    if ($resp.value) {
+                        foreach ($item in $resp.value) { [void]$items.Add($item) }
+                    }
+                    $nextUri = if ($resp.PSObject.Properties.Name -contains 'nextLink') { $resp.nextLink } else { $null }
+                }
+                catch {
+                    Write-Verbose "ARM list failed ($nextUri): $($_.Exception.Message)"
+                    break
+                }
+            }
+            return ,$items
         }
+
+        # Resolve a role definition (full ARM path or bare GUID) to its friendly name.
+        $resolveRoleDefName = {
+            param([string]$RoleDefId)
+            if ([string]::IsNullOrEmpty($RoleDefId)) { return 'Unknown' }
+            $guid = $RoleDefId
+            if ($guid -match '/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})') { $guid = $matches[1] }
+            if ($roleDefCache.ContainsKey($guid)) { return $roleDefCache[$guid] }
+            try {
+                $rdPath = if ($RoleDefId.StartsWith('/')) { $RoleDefId } else { "/providers/Microsoft.Authorization/roleDefinitions/$guid" }
+                $rdUri  = "https://management.azure.com$rdPath`?api-version=2022-04-01"
+                $rdResp = Invoke-RestMethod -Uri $rdUri -Headers $headers -Method Get -ErrorAction SilentlyContinue
+                $name   = if ($rdResp -and $rdResp.properties -and $rdResp.properties.roleName) { $rdResp.properties.roleName } else { "Unknown ($guid)" }
+            }
+            catch {
+                $name = "Unknown ($guid)"
+            }
+            $roleDefCache[$guid] = $name
+            return $name
+        }
+
+        # Resolve a subscription display name via ARM REST (does not require Az.Resources).
+        $resolveSubName = {
+            param([string]$SubId)
+            if ([string]::IsNullOrEmpty($SubId)) { return $null }
+            if ($subNameCache.ContainsKey($SubId)) { return $subNameCache[$SubId] }
+            $name = $SubId
+            try {
+                $sUri  = "https://management.azure.com/subscriptions/$SubId`?api-version=2022-12-01"
+                $sResp = Invoke-RestMethod -Uri $sUri -Headers $headers -Method Get -ErrorAction SilentlyContinue
+                if ($sResp -and $sResp.displayName) { $name = $sResp.displayName }
+            }
+            catch { }
+            $subNameCache[$SubId] = $name
+            return $name
+        }
+
+        # Resolve a management-group display name via ARM REST.
+        $resolveMgName = {
+            param([string]$MgId)
+            if ([string]::IsNullOrEmpty($MgId)) { return $null }
+            if ($mgNameCache.ContainsKey($MgId)) { return $mgNameCache[$MgId] }
+            $name = $MgId
+            try {
+                $mUri  = "https://management.azure.com/providers/Microsoft.Management/managementGroups/$MgId`?api-version=2020-05-01"
+                $mResp = Invoke-RestMethod -Uri $mUri -Headers $headers -Method Get -ErrorAction SilentlyContinue
+                if ($mResp -and $mResp.properties -and $mResp.properties.displayName) { $name = $mResp.properties.displayName }
+            }
+            catch { }
+            $mgNameCache[$MgId] = $name
+            return $name
+        }
+
+        # Resolve an ARM scope string to a structured info hashtable.
+        $getScopeInfo = {
+            param([string]$Scope)
+
+            if ([string]::IsNullOrEmpty($Scope) -or $Scope -eq '/') {
+                return @{
+                    ScopeType        = 'Tenant'
+                    ResourceDisplay  = '/'
+                    SubscriptionId   = $null
+                    SubscriptionName = $null
+                    ScopeDisplayName = 'Tenant Root'
+                }
+            }
+            if ($Scope -match '^/providers/Microsoft\.Management/managementGroups/([^/]+)$') {
+                $mgId = $matches[1]
+                $dn   = & $resolveMgName $mgId
+                return @{
+                    ScopeType        = 'Management Group'
+                    ResourceDisplay  = $dn
+                    SubscriptionId   = $null
+                    SubscriptionName = $null
+                    ScopeDisplayName = "MG: $dn"
+                }
+            }
+            if ($Scope -match '^/subscriptions/([a-fA-F0-9\-]{36})/resourceGroups/([^/]+)/providers/.+$') {
+                $subId   = $matches[1]
+                $resName = ($Scope -split '/')[-1]
+                $subName = & $resolveSubName $subId
+                return @{
+                    ScopeType        = 'Resource'
+                    ResourceDisplay  = $resName
+                    SubscriptionId   = $subId
+                    SubscriptionName = $subName
+                    ScopeDisplayName = "Resource: $resName"
+                }
+            }
+            if ($Scope -match '^/subscriptions/([a-fA-F0-9\-]{36})/resourceGroups/([^/]+)$') {
+                $subId   = $matches[1]
+                $rgName  = $matches[2]
+                $subName = & $resolveSubName $subId
+                return @{
+                    ScopeType        = 'Resource Group'
+                    ResourceDisplay  = $rgName
+                    SubscriptionId   = $subId
+                    SubscriptionName = $subName
+                    ScopeDisplayName = "RG: $rgName"
+                }
+            }
+            if ($Scope -match '^/subscriptions/([a-fA-F0-9\-]{36})$') {
+                $subId   = $matches[1]
+                $subName = & $resolveSubName $subId
+                return @{
+                    ScopeType        = 'Subscription'
+                    ResourceDisplay  = $subName
+                    SubscriptionId   = $subId
+                    SubscriptionName = $subName
+                    ScopeDisplayName = "Sub: $subName"
+                }
+            }
+            return @{
+                ScopeType        = 'Unknown'
+                ResourceDisplay  = $Scope
+                SubscriptionId   = $null
+                SubscriptionName = $null
+                ScopeDisplayName = $Scope
+            }
+        }
+
+        # ----- 5. Query root-scope endpoints with asTarget() -----------------------
+        $apiVer  = '2020-10-01'
+        $baseUri = 'https://management.azure.com/providers/Microsoft.Authorization'
+
+        $eligibleRaw = @()
+        $activeRaw   = @()
+
+        if ($IncludeEligible) {
+            $uri = "$baseUri/roleEligibilityScheduleInstances?api-version=$apiVer&`$filter=asTarget()"
+            Write-Verbose "Querying eligible role schedule instances: $uri"
+            $eligibleRaw = & $invokeArmList $uri
+            Write-Verbose "asTarget() returned $($eligibleRaw.Count) eligible Azure Resource role instance(s)"
+        }
+
+        if ($IncludeActive) {
+            $uri = "$baseUri/roleAssignmentScheduleInstances?api-version=$apiVer&`$filter=asTarget()"
+            Write-Verbose "Querying active role schedule instances: $uri"
+            $activeRaw = & $invokeArmList $uri
+            Write-Verbose "asTarget() returned $($activeRaw.Count) active Azure Resource role instance(s)"
+        }
+
+        # ----- 6. Project raw items into role objects ------------------------------
+        $allRoles = [System.Collections.ArrayList]::new()
+
+        # Safe property accessor - StrictMode-friendly. Returns $null if the
+        # property is missing instead of throwing.
+        $getProp = {
+            param($Object, [string]$Name)
+            if ($null -eq $Object) { return $null }
+            $p = $Object.PSObject.Properties[$Name]
+            if ($p) { return $p.Value }
+            return $null
+        }
+
+        $projectInstance = {
+            param($Item, [string]$Status)
+
+            $props = & $getProp $Item 'properties'
+            if (-not $props) { return $null }
+
+            $scope        = & $getProp $props 'scope'
+            $roleDefId    = & $getProp $props 'roleDefinitionId'
+            $principalId  = & $getProp $props 'principalId'
+            $principalTyp = & $getProp $props 'principalType'
+            $startDt      = & $getProp $props 'startDateTime'
+            $endDt        = & $getProp $props 'endDateTime'
+            $assignType   = & $getProp $props 'assignmentType'   # 'Activated' or 'Assigned' (active endpoint)
+            $memberTypeAp = & $getProp $props 'memberType'       # 'Direct' / 'Inherited' / 'Group'
+
+            $scopeInfo = & $getScopeInfo $scope
+            $roleName  = & $resolveRoleDefName $roleDefId
+
+            # Direct vs Inherited - prefer ARM-supplied memberType when present,
+            # otherwise derive from principal identity vs caller.
+            $memberType = if ($memberTypeAp) {
+                $memberTypeAp
+            }
+            elseif ($principalTyp -eq 'Group') {
+                'Group'
+            }
+            elseif ($principalId -and $principalId -ne $UserObjectId) {
+                'Inherited'
+            }
+            else {
+                'Direct'
+            }
+
+            $formatted = if ($scopeInfo.ScopeDisplayName) { $scopeInfo.ScopeDisplayName } else { $scope }
+
+            [PSCustomObject]@{
+                RoleId               = $Item.name
+                RoleDefinitionId     = $roleDefId
+                DisplayName          = $roleName
+                ResourceName         = $scopeInfo.ResourceDisplay
+                ResourceDisplayName  = $scopeInfo.ResourceDisplay
+                ScopeDisplayName     = $scopeInfo.ScopeDisplayName
+                Type                 = 'AzureResource'
+                Status               = $Status
+                MemberType           = $memberType
+                SubscriptionId       = $scopeInfo.SubscriptionId
+                SubscriptionName     = $scopeInfo.SubscriptionName
+                FullScope            = $scope
+                ObjectId             = $principalId
+                ObjectType           = $principalTyp
+                StartDateTime        = $startDt
+                EndDateTime          = $endDt
+                Scope                = $scopeInfo.ScopeType
+                FormattedScope       = $formatted
+                AssignmentType       = $assignType
+                # Used by reduced-scope Azure activation. For eligible instances ARM
+                # returns the parent eligibility schedule ID in roleEligibilityScheduleId.
+                LinkedRoleEligibilityScheduleId = (& $getProp $props 'roleEligibilityScheduleId')
+            }
+        }
+
+        foreach ($item in $eligibleRaw) {
+            $obj = & $projectInstance $item 'Eligible'
+            if ($obj) { [void]$allRoles.Add($obj) }
+        }
+        foreach ($item in $activeRaw) {
+            $obj = & $projectInstance $item 'Active'
+            if ($obj) { [void]$allRoles.Add($obj) }
+        }
+
+        Write-Verbose "Projected $($allRoles.Count) Azure Resource role object(s) from ARM root-scope query"
+
+        # ----- 7. Optional client-side subscription filter -------------------------
+        if ($SubscriptionIds -and $SubscriptionIds.Count -gt 0) {
+            $subFilter = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($s in $SubscriptionIds) { if ($s) { [void]$subFilter.Add($s) } }
+            $filtered = [System.Collections.ArrayList]::new()
+            foreach ($r in $allRoles) {
+                # Keep roles with no subscription (tenant / MG scopes) plus those in the filter set.
+                if (-not $r.SubscriptionId -or $subFilter.Contains($r.SubscriptionId)) {
+                    [void]$filtered.Add($r)
+                }
+            }
+            Write-Verbose "Filtered by SubscriptionIds: kept $($filtered.Count) of $($allRoles.Count) role(s)"
+            $allRoles = $filtered
+        }
+
+        # ----- 8. Deduplicate ------------------------------------------------------
+        $uniqueRoles = [System.Collections.ArrayList]::new()
+        $seen = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($r in $allRoles) {
+            $defGuid = $r.RoleDefinitionId
+            if ($defGuid -and $defGuid -match '/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})') { $defGuid = $matches[1] }
+            $key = "{0}|{1}|{2}|{3}" -f $defGuid, $r.FullScope, $r.Status, $r.ObjectId
+            if ($seen.Add($key)) { [void]$uniqueRoles.Add($r) }
+        }
+
+        $activeCount   = @($uniqueRoles | Where-Object { $_.Status -eq 'Active' }).Count
+        $eligibleCount = @($uniqueRoles | Where-Object { $_.Status -eq 'Eligible' }).Count
+        Write-Verbose "Azure Resource roles after dedupe: $($uniqueRoles.Count) total ($eligibleCount eligible, $activeCount active)"
+
+        # Return as concrete array
+        return ,@($uniqueRoles)
     }
     catch {
-        throw "Failed to acquire ARM access token: $($_.Exception.Message)"
+        Write-Warning "Failed to retrieve Azure Resource roles: $($_.Exception.Message)"
+        return @()
     }
-
-    $headers = @{
-        'Authorization' = "Bearer $armToken"
-        'Content-Type'  = 'application/json'
+    finally {
+        # Best-effort scrub of plaintext bearer token from memory.
+        if (Get-Variable -Name 'armToken' -Scope 0 -ErrorAction SilentlyContinue) { $armToken = $null }
+        if (Get-Variable -Name 'headers'  -Scope 0 -ErrorAction SilentlyContinue) { $headers  = $null }
     }
-
-    # ── 3. Local caches for display-name resolution ──────────────────────────
-    $roleDefCache = @{}   # guid -> friendly role name
-    $subNameCache = @{}   # subId -> subscription display name
-    $mgNameCache  = @{}   # mgId  -> management-group display name
-
-    $allRoles = [System.Collections.ArrayList]::new()
-
-    # ── 4. Helpers ────────────────────────────────────────────────────────────
-
-    # Paginate through a single ARM list endpoint and return all items.
-    $InvokeArmList = {
-        param([string]$Uri)
-        $items   = [System.Collections.ArrayList]::new()
-        $nextUri = $Uri
-        while ($nextUri) {
-            try {
-                $resp    = Invoke-RestMethod -Uri $nextUri -Headers $headers -Method Get -ErrorAction Stop
-                if ($resp.value) {
-                    foreach ($item in $resp.value) { $items.Add($item) | Out-Null }
-                }
-                $nextUri = if ($resp.PSObject.Properties.Name -contains 'nextLink') {
-                    $resp.nextLink
-                } else { $null }
-            }
-            catch {
-                Write-Verbose "ARM list failed ($nextUri): $($_.Exception.Message)"
-                break
-            }
-        }
-        return ,$items
-    }
-
-    # Resolve a roleDefinitionId (full ARM path or bare GUID) to its display name.
-    # Uses the ARM REST API directly (via the bearer token already acquired) so that
-    # Az.Resources is NOT required and no standing subscription permissions are needed.
-    $ResolveRoleDefName = {
-        param([string]$RoleDefId)
-        $guid = $RoleDefId
-        if ($guid -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") {
-            $guid = $matches[1]
-        }
-        if ($roleDefCache.ContainsKey($guid)) { return $roleDefCache[$guid] }
-        try {
-            # Prefer the original full path; fall back to the global built-in role path
-            $rdPath = if ($RoleDefId -match "^/") { $RoleDefId } else { "/providers/Microsoft.Authorization/roleDefinitions/$guid" }
-            $rdUri  = "https://management.azure.com$rdPath`?api-version=2022-04-01"
-            $rdResp = Invoke-RestMethod -Uri $rdUri -Headers $headers -Method Get -ErrorAction SilentlyContinue
-            $name   = if ($rdResp -and $rdResp.properties -and $rdResp.properties.roleName) {
-                          $rdResp.properties.roleName
-                      } else { "Unknown ($guid)" }
-        }
-        catch { $name = "Unknown ($guid)" }
-        $roleDefCache[$guid] = $name
-        return $name
-    }
-
-    # Resolve an ARM scope string to a structured info hashtable.
-    $GetScopeInfo = {
-        param([string]$Scope)
-        if ([string]::IsNullOrEmpty($Scope) -or $Scope -eq '/') {
-            return @{
-                ScopeType       = 'Tenant'
-                ResourceDisplay = '/'
-                SubscriptionId  = $null
-                ScopeDisplayName = 'Tenant Root'
-            }
-        }
-        if ($Scope -match "^/providers/Microsoft\.Management/managementGroups/([^/]+)$") {
-            $mgId = $matches[1]
-            if (-not $mgNameCache.ContainsKey($mgId)) {
-                try {
-                    $mg = Get-AzManagementGroup -GroupId $mgId -ErrorAction SilentlyContinue
-                    $mgNameCache[$mgId] = if ($mg -and $mg.DisplayName) { $mg.DisplayName } else { $mgId }
-                }
-                catch { $mgNameCache[$mgId] = $mgId }
-            }
-            $dn = $mgNameCache[$mgId]
-            return @{
-                ScopeType        = 'Management Group'
-                ResourceDisplay  = $dn
-                SubscriptionId   = $null
-                ScopeDisplayName = "MG: $dn"
-            }
-        }
-        if ($Scope -match "^/subscriptions/([a-fA-F0-9\-]{36})/resourceGroups/([^/]+)/(.+)$") {
-            $subId = $matches[1]; $rgName = $matches[2]; $resName = ($Scope -split '/')[-1]
-            if (-not $subNameCache.ContainsKey($subId)) {
-                try {
-                    $sub = Get-AzSubscription -SubscriptionId $subId -ErrorAction SilentlyContinue
-                    $subNameCache[$subId] = if ($sub -and $sub.Name) { $sub.Name } else { $subId }
-                }
-                catch { $subNameCache[$subId] = $subId }
-            }
-            return @{
-                ScopeType        = 'Resource'
-                ResourceDisplay  = $resName
-                SubscriptionId   = $subId
-                ScopeDisplayName = "Resource: $resName"
-            }
-        }
-        if ($Scope -match "^/subscriptions/([a-fA-F0-9\-]{36})/resourceGroups/([^/]+)$") {
-            $subId = $matches[1]; $rgName = $matches[2]
-            if (-not $subNameCache.ContainsKey($subId)) {
-                try {
-                    $sub = Get-AzSubscription -SubscriptionId $subId -ErrorAction SilentlyContinue
-                    $subNameCache[$subId] = if ($sub -and $sub.Name) { $sub.Name } else { $subId }
-                }
-                catch { $subNameCache[$subId] = $subId }
-            }
-            return @{
-                ScopeType        = 'Resource Group'
-                ResourceDisplay  = $rgName
-                SubscriptionId   = $subId
-                ScopeDisplayName = "RG: $rgName"
-            }
-        }
-        if ($Scope -match "^/subscriptions/([a-fA-F0-9\-]{36})$") {
-            $subId = $matches[1]
-            if (-not $subNameCache.ContainsKey($subId)) {
-                try {
-                    $sub = Get-AzSubscription -SubscriptionId $subId -ErrorAction SilentlyContinue
-                    $subNameCache[$subId] = if ($sub -and $sub.Name) { $sub.Name } else { $subId }
-                }
-                catch { $subNameCache[$subId] = $subId }
-            }
-            return @{
-                ScopeType        = 'Subscription'
-                ResourceDisplay  = $subNameCache[$subId]
-                SubscriptionId   = $subId
-                ScopeDisplayName = 'Subscription'
-            }
-        }
-        # Fallback for any deeper resource scope that starts with /subscriptions/
-        if ($Scope -match "^/subscriptions/([a-fA-F0-9\-]{36})") {
-            $subId = $matches[1]
-            if (-not $subNameCache.ContainsKey($subId)) {
-                try {
-                    $sub = Get-AzSubscription -SubscriptionId $subId -ErrorAction SilentlyContinue
-                    $subNameCache[$subId] = if ($sub -and $sub.Name) { $sub.Name } else { $subId }
-                }
-                catch { $subNameCache[$subId] = $subId }
-            }
-            $resName = ($Scope -split '/')[-1]
-            return @{
-                ScopeType        = 'Resource'
-                ResourceDisplay  = $resName
-                SubscriptionId   = $subId
-                ScopeDisplayName = "Resource: $resName"
-            }
-        }
-        return @{
-            ScopeType        = 'Unknown'
-            ResourceDisplay  = $Scope
-            SubscriptionId   = $null
-            ScopeDisplayName = $Scope
-        }
-    }
-
-    # Decide whether a given ARM scope passes the caller's SubscriptionIds / OnlyDirtyManagementGroups filter.
-    $TestScopeFilter = {
-        param([string]$Scope)
-        if ($SubscriptionIds -and $SubscriptionIds.Count -gt 0) {
-            foreach ($sid in $SubscriptionIds) {
-                if (-not [string]::IsNullOrEmpty($sid) -and $Scope -match [regex]::Escape($sid)) {
-                    return $true
-                }
-            }
-            return $false
-        }
-        if ($OnlyDirtyManagementGroups) {
-            $dirtyMgs = @()
-            if (Get-Variable -Name 'DirtyManagementGroups' -Scope Script -ErrorAction SilentlyContinue) {
-                $dirtyMgs = @($script:DirtyManagementGroups | Where-Object { $_ } | Select-Object -Unique)
-            }
-            if ($Scope -match "^/providers/Microsoft\.Management/managementGroups/([^/]+)$") {
-                return ($dirtyMgs -contains $matches[1])
-            }
-            return $false
-        }
-        return $true
-    }
-
-    # ── 5. Eligible roles via roleEligibilitySchedules ───────────────────────
-    if ($IncludeEligible) {
-        Write-Verbose "Querying ARM root: roleEligibilitySchedules for principal $UserObjectId"
-        $uri = "https://management.azure.com/providers/Microsoft.Authorization/roleEligibilitySchedules" +
-               "?api-version=2020-10-01&`$filter=principalId eq '$UserObjectId'"
-
-        $schedules = & $InvokeArmList -Uri $uri
-        Write-Verbose "  Received $($schedules.Count) eligible schedule(s)"
-
-        foreach ($schedule in $schedules) {
-            try {
-                $scope = $schedule.properties.scope
-                if (-not (& $TestScopeFilter -Scope $scope)) { continue }
-
-                $roleDefId  = $schedule.properties.roleDefinitionId
-                $roleName   = & $ResolveRoleDefName -RoleDefId $roleDefId
-                $scopeInfo  = & $GetScopeInfo -Scope $scope
-                $eligibilityScheduleId = if ($schedule.PSObject.Properties['id']) { $schedule.id } else { $null }
-                $eligibilityScheduleName = if ($schedule.PSObject.Properties['name']) { $schedule.name } else { $null }
-
-                $roleObj = [PSCustomObject]@{
-                    Type                = 'AzureResource'
-                    DisplayName         = $roleName
-                    Status              = 'Eligible'
-                    Assignment          = $schedule
-                    RoleDefinitionId    = $roleDefId
-                    SubscriptionId      = $scopeInfo.SubscriptionId
-                    SubscriptionName    = if ($scopeInfo.SubscriptionId -and $subNameCache.ContainsKey($scopeInfo.SubscriptionId)) {
-                                             $subNameCache[$scopeInfo.SubscriptionId]
-                                         } else { $null }
-                    ResourceName        = $scopeInfo.ResourceDisplay
-                    ResourceDisplayName = $scopeInfo.ResourceDisplay
-                    Scope               = $scopeInfo.ScopeType
-                    FullScope           = $scope
-                    MemberType          = if ($schedule.properties.memberType) { $schedule.properties.memberType } else { 'Direct' }
-                    EndDateTime         = $schedule.properties.endDateTime
-                    ScopeDisplayName    = $scopeInfo.ScopeDisplayName
-                    Id                  = $roleDefId
-                    ObjectId            = $UserObjectId
-                    PrincipalId         = $UserObjectId
-                    EligibilityScheduleId   = $eligibilityScheduleId
-                    EligibilityScheduleName = $eligibilityScheduleName
-                    OriginalEligibilityScope = $scope
-                }
-                $allRoles.Add($roleObj) | Out-Null
-                Write-Verbose "  Eligible: $roleName @ $($scopeInfo.ScopeDisplayName)"
-            }
-            catch {
-                Write-Verbose "  Failed to process eligible schedule: $($_.Exception.Message)"
-            }
-        }
-    }
-
-    # ── 6. Active roles ───────────────────────────────────────────────────────
-    # Two sources are required for a complete picture:
-    #   A) roleAssignmentScheduleInstances – PIM-managed assignments (both
-    #      time-limited activations and permanent assignments configured via PIM).
-    #      status is 'Provisioned' (not 'Active') for active instances.
-    #   B) roleAssignments – ALL direct RBAC assignments including non-PIM ones
-    #      (e.g. Owner assigned directly in the portal).
-    # We merge both sources and deduplicate on (scope + roleDefinitionId GUID).
-    if ($IncludeActive) {
-
-        # Track (scope|rdGuid) pairs already added to avoid duplicates
-        $seenActiveKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-
-        # ── A) PIM schedule instances ─────────────────────────────────────────
-        Write-Verbose "Querying ARM root: roleAssignmentScheduleInstances for principal $UserObjectId"
-        $uri = "https://management.azure.com/providers/Microsoft.Authorization/roleAssignmentScheduleInstances" +
-               "?api-version=2020-10-01&`$filter=principalId eq '$UserObjectId'"
-
-        $activeSchedules = & $InvokeArmList -Uri $uri
-        Write-Verbose "  Received $($activeSchedules.Count) schedule instance(s)"
-
-        # Statuses that indicate the assignment is NOT currently in effect
-        $terminatedStatuses = @('Revoked','Canceled','TimedOut','Denied','AdminDenied','PendingRevocation','Expired')
-
-        foreach ($schedule in $activeSchedules) {
-            try {
-                $scope = $schedule.properties.scope
-                if (-not (& $TestScopeFilter -Scope $scope)) { continue }
-
-                $status = $schedule.properties.status
-                if ($status -and $status -in $terminatedStatuses) {
-                    Write-Verbose "  Skipping instance with terminal status '$status' (scope: $scope)"
-                    continue
-                }
-
-                $roleDefId = $schedule.properties.roleDefinitionId
-                $rdGuid    = if ($roleDefId -match '/roleDefinitions/([a-fA-F0-9\-]{36})') { $matches[1] } else { $roleDefId }
-                $dedupeKey = "$scope|$rdGuid"
-                if (-not $seenActiveKeys.Add($dedupeKey)) { continue }
-
-                $roleName  = & $ResolveRoleDefName -RoleDefId $roleDefId
-                $scopeInfo = & $GetScopeInfo -Scope $scope
-
-                $roleObj = [PSCustomObject]@{
-                    Type                = 'AzureResource'
-                    DisplayName         = $roleName
-                    Status              = 'Active'
-                    Assignment          = $schedule
-                    RoleDefinitionId    = $roleDefId
-                    SubscriptionId      = $scopeInfo.SubscriptionId
-                    SubscriptionName    = if ($scopeInfo.SubscriptionId -and $subNameCache.ContainsKey($scopeInfo.SubscriptionId)) { $subNameCache[$scopeInfo.SubscriptionId] } else { $null }
-                    ResourceName        = $scopeInfo.ResourceDisplay
-                    ResourceDisplayName = $scopeInfo.ResourceDisplay
-                    Scope               = $scopeInfo.ScopeType
-                    FullScope           = $scope
-                    MemberType          = if ($schedule.properties.memberType) { $schedule.properties.memberType } else { 'Direct' }
-                    StartDateTime       = $schedule.properties.startDateTime
-                    EndDateTime         = $schedule.properties.endDateTime
-                    ScopeDisplayName    = $scopeInfo.ScopeDisplayName
-                    ScheduleId          = $schedule.name
-                    Id                  = $roleDefId
-                    ObjectId            = $UserObjectId
-                    PrincipalId         = $UserObjectId
-                    AssignmentType      = if ($schedule.properties.assignmentType) { $schedule.properties.assignmentType } else { 'Assigned' }
-                }
-                $allRoles.Add($roleObj) | Out-Null
-                Write-Verbose "  Active (PIM): $roleName @ $($scopeInfo.ScopeDisplayName) [assignmentType=$($schedule.properties.assignmentType)]"
-            }
-            catch {
-                Write-Verbose "  Failed to process schedule instance: $($_.Exception.Message)"
-            }
-        }
-
-        # ── B) Direct roleAssignments (non-PIM and PIM-activated) ────────────
-        # The assignedTo() filter returns all assignments for the principal,
-        # including inherited group-based ones via transitivity.
-        Write-Verbose "Querying ARM root: roleAssignments for principal $UserObjectId"
-        $uri2 = "https://management.azure.com/providers/Microsoft.Authorization/roleAssignments" +
-                "?api-version=2022-04-01&`$filter=assignedTo('$UserObjectId')"
-
-        $directAssignments = & $InvokeArmList -Uri $uri2
-        Write-Verbose "  Received $($directAssignments.Count) role assignment(s)"
-
-        foreach ($ra in $directAssignments) {
-            try {
-                $scope = $ra.properties.scope
-                if (-not (& $TestScopeFilter -Scope $scope)) { continue }
-
-                $roleDefId = $ra.properties.roleDefinitionId
-                $rdGuid    = if ($roleDefId -match '/roleDefinitions/([a-fA-F0-9\-]{36})') { $matches[1] } else { $roleDefId }
-                $dedupeKey = "$scope|$rdGuid"
-                # Skip if already captured via schedule instances
-                if (-not $seenActiveKeys.Add($dedupeKey)) { continue }
-
-                $roleName  = & $ResolveRoleDefName -RoleDefId $roleDefId
-                $scopeInfo = & $GetScopeInfo -Scope $scope
-
-                # assignedTo() includes group-inherited roles; detect them by principalId
-                $isGroupInherited = $ra.properties.principalId -and
-                                    $ra.properties.principalId -ne $UserObjectId
-
-                $roleObj = [PSCustomObject]@{
-                    Type                = 'AzureResource'
-                    DisplayName         = $roleName
-                    Status              = 'Active'
-                    Assignment          = $ra
-                    RoleDefinitionId    = $roleDefId
-                    SubscriptionId      = $scopeInfo.SubscriptionId
-                    SubscriptionName    = if ($scopeInfo.SubscriptionId -and $subNameCache.ContainsKey($scopeInfo.SubscriptionId)) { $subNameCache[$scopeInfo.SubscriptionId] } else { $null }
-                    ResourceName        = $scopeInfo.ResourceDisplay
-                    ResourceDisplayName = $scopeInfo.ResourceDisplay
-                    Scope               = $scopeInfo.ScopeType
-                    FullScope           = $scope
-                    MemberType          = if ($isGroupInherited) { 'Group' } else { 'Direct' }
-                    StartDateTime       = $ra.properties.createdOn
-                    EndDateTime         = $null   # permanent assignment
-                    ScopeDisplayName    = $scopeInfo.ScopeDisplayName
-                    ScheduleId          = $ra.name
-                    Id                  = $roleDefId
-                    ObjectId            = $UserObjectId
-                    PrincipalId         = $UserObjectId
-                    AssignmentType      = 'Assigned'
-                }
-                $allRoles.Add($roleObj) | Out-Null
-                Write-Verbose "  Active (direct): $roleName @ $($scopeInfo.ScopeDisplayName)"
-            }
-            catch {
-                Write-Verbose "  Failed to process role assignment: $($_.Exception.Message)"
-            }
-        }
-    }
-
-    Write-Verbose "Get-AzureResourceRoles: returning $($allRoles.Count) role(s) total"
-    return $allRoles.ToArray()
 }

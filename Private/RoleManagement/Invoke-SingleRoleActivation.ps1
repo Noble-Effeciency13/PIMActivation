@@ -1,4 +1,44 @@
 function Invoke-SingleRoleActivation {
+    <#
+    .SYNOPSIS
+        Submits one PIM role activation request.
+
+    .DESCRIPTION
+        Activates a single Entra, PIM-enabled group, or Azure Resource role. The function is used
+        by sequential fallback paths and authentication-context flows, and it accepts an optional
+        scheduled start time so fallback requests preserve the same date/time selected in the
+        activation dialog.
+
+    .PARAMETER RoleData
+        Role metadata for the selected role.
+
+    .PARAMETER Justification
+        Justification text to submit with the activation request.
+
+    .PARAMETER EffectiveDuration
+        Duration after policy maximum enforcement.
+
+    .PARAMETER TicketInfo
+        Optional ticket metadata when required by policy.
+
+    .PARAMETER AuthContextToken
+        Optional pre-obtained authentication-context token for direct REST activation.
+
+    .PARAMETER AuthenticationContextId
+        Optional authentication context ID used by fallback activation flows.
+
+    .PARAMETER UseFallbackMethod
+        Uses the existing authentication-context fallback method for Graph role activation.
+
+    .PARAMETER ScheduleStartTime
+        Optional local date/time when the activation should start.
+
+    .PARAMETER AzureTargetScope
+        Optional reduced Azure Resource scope for Azure activation.
+
+    .PARAMETER LinkedRoleEligibilityScheduleId
+        Optional Azure eligibility schedule ID required for reduced-scope activation.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -18,6 +58,8 @@ function Invoke-SingleRoleActivation {
         
         [switch]$UseFallbackMethod,
 
+        [datetime]$ScheduleStartTime,
+
         [string]$AzureTargetScope,
 
         [string]$LinkedRoleEligibilityScheduleId
@@ -36,7 +78,14 @@ function Invoke-SingleRoleActivation {
                 Write-Verbose "Eligibility check completed. IsEligible: $($eligibilityCheck.IsEligible)"
                 
                 # Get activation parameters
-                $activationParams = Get-RoleActivationParameters -RoleData $RoleData -Justification $Justification -EffectiveDuration $EffectiveDuration -TicketInfo $TicketInfo
+                $activationParamArgs = @{
+                    RoleData          = $RoleData
+                    Justification     = $Justification
+                    EffectiveDuration = $EffectiveDuration
+                    TicketInfo        = $TicketInfo
+                }
+                if ($PSBoundParameters.ContainsKey('ScheduleStartTime')) { $activationParamArgs.ScheduleStartTime = $ScheduleStartTime }
+                $activationParams = Get-RoleActivationParameters @activationParamArgs
                 
                 # Choose activation method
                 if ($AuthContextToken) {
@@ -57,7 +106,14 @@ function Invoke-SingleRoleActivation {
             
             'Group' {
                 # Get activation parameters
-                $activationParams = Get-RoleActivationParameters -RoleData $RoleData -Justification $Justification -EffectiveDuration $EffectiveDuration -TicketInfo $TicketInfo
+                $activationParamArgs = @{
+                    RoleData          = $RoleData
+                    Justification     = $Justification
+                    EffectiveDuration = $EffectiveDuration
+                    TicketInfo        = $TicketInfo
+                }
+                if ($PSBoundParameters.ContainsKey('ScheduleStartTime')) { $activationParamArgs.ScheduleStartTime = $ScheduleStartTime }
+                $activationParams = Get-RoleActivationParameters @activationParamArgs
                 
                 # Choose activation method
                 if ($AuthContextToken) {
@@ -84,6 +140,7 @@ function Invoke-SingleRoleActivation {
                     EffectiveDuration = $EffectiveDuration
                     TicketInfo        = $TicketInfo
                 }
+                if ($PSBoundParameters.ContainsKey('ScheduleStartTime')) { $azureParamArgs.ScheduleStartTime = $ScheduleStartTime }
                 if ($AzureTargetScope) { $azureParamArgs.AzureTargetScope = $AzureTargetScope }
                 if ($LinkedRoleEligibilityScheduleId) { $azureParamArgs.LinkedRoleEligibilityScheduleId = $LinkedRoleEligibilityScheduleId }
 

@@ -1,36 +1,29 @@
 function Get-PIMActivationProfiles {
     <#
     .SYNOPSIS
-        [PLANNED FEATURE] Retrieves saved PIM activation profiles.
-    
-    .DESCRIPTION
-        This feature is planned for a future release and is not currently implemented.
-        When implemented, it will retrieve saved role combinations and activation preferences
-        for quick activation scenarios, particularly useful for MSPs managing multiple tenants.
-    
-    .EXAMPLE
-        Get-PIMActivationProfiles
-        Will retrieve saved activation profiles when this feature is implemented.
-    
-    .OUTPUTS
-        System.Object[]
-        Currently returns an empty array. Will return profile objects when implemented.
-    
-    .NOTES
-        Status: Not Implemented
-        Planned Version: 3.0.0
-        
-        Planned features:
-        - Save frequently used role combinations
-        - Cross-tenant profile support for MSPs
-        - Quick activation with saved preferences
-        - Profile import/export functionality
+        Retrieves saved PIM activation profiles from the local user profile.
     #>
     [CmdletBinding()]
     param()
-    
-    Write-Warning "Profile management is not yet implemented. This feature is planned for version 3.0.0."
-    Write-Verbose "Get-PIMActivationProfiles placeholder called - returning empty array"
-    
-    return @()
+
+    $profilePath = Get-PIMActivationProfileStorePath
+    if (-not (Test-Path -Path $profilePath)) {
+        return @()
+    }
+
+    $profiles = [System.Collections.ArrayList]::new()
+    foreach ($file in @(Get-ChildItem -Path $profilePath -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+        try {
+            $profile = Get-Content -Path $file.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if (-not $profile.PSObject.Properties['FilePath']) {
+                $profile | Add-Member -MemberType NoteProperty -Name FilePath -Value $file.FullName
+            }
+            $null = $profiles.Add($profile)
+        }
+        catch {
+            Write-Warning "Failed to read activation profile '$($file.Name)': $($_.Exception.Message)"
+        }
+    }
+
+    return @($profiles | Sort-Object Name)
 }

@@ -120,23 +120,24 @@ function Show-OperationSplash {
             }
             $headerPanel.Controls.Add($titleLabel)
 
+            $statusLabelHeight = if ($syncHash.ShowProgressBar) { [Math]::Max(40, $syncHash.Height - 130) } else { [Math]::Max(40, $syncHash.Height - 95) }
+            $progressBarY = [Math]::Max(105, $syncHash.Height - 65)
+
             # Status label
             $statusLabel = New-Object System.Windows.Forms.Label -Property @{
                 Text         = $syncHash.Message
                 Font         = [System.Drawing.Font]::new("Segoe UI", 10)
                 Location     = [System.Drawing.Point]::new(15, 55)
-                Size         = [System.Drawing.Size]::new($syncHash.Width - 30, 40)
-                TextAlign    = 'MiddleCenter'
+                Size         = [System.Drawing.Size]::new($syncHash.Width - 30, $statusLabelHeight)
+                TextAlign    = if ($syncHash.Message -match "[\r\n]") { 'TopLeft' } else { 'MiddleCenter' }
                 ForeColor    = [System.Drawing.Color]::FromArgb(32, 31, 30)
                 Anchor       = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
-                AutoEllipsis = $true
+                AutoEllipsis = $false
             }
-            $form.Controls.Add($statusLabel)
-
-            # Progress bar (optional)
+            $form.Controls.Add($statusLabel)            # Progress bar (optional)
             if ($syncHash.ShowProgressBar) {
                 $progressBar = New-Object System.Windows.Forms.ProgressBar -Property @{
-                    Location  = [System.Drawing.Point]::new(20, 105)
+                    Location  = [System.Drawing.Point]::new(20, $progressBarY)
                     Size      = [System.Drawing.Size]::new($syncHash.Width - 40, 20)
                     Style     = [System.Windows.Forms.ProgressBarStyle]::Continuous
                     Minimum   = 0
@@ -193,6 +194,45 @@ function Show-OperationSplash {
                     # Update status text
                     if ($syncHash.StatusLabel.Text -ne $syncHash.Message) {
                         $syncHash.StatusLabel.Text = $syncHash.Message
+                        $syncHash.StatusLabel.TextAlign = if ($syncHash.Message -match "[\r\n]") { 'TopLeft' } else { 'MiddleCenter' }
+
+                        # Auto-grow / shrink the form so the full message is visible.
+                        try {
+                            $labelWidth = $syncHash.StatusLabel.Width
+                            if ($labelWidth -lt 50) { $labelWidth = $syncHash.Form.ClientSize.Width - 30 }
+
+                            $measured = [System.Windows.Forms.TextRenderer]::MeasureText(
+                                $syncHash.Message,
+                                $syncHash.StatusLabel.Font,
+                                [System.Drawing.Size]::new($labelWidth, [int]::MaxValue),
+                                ([System.Windows.Forms.TextFormatFlags]::WordBreak -bor [System.Windows.Forms.TextFormatFlags]::TextBoxControl)
+                            )
+
+                            $minLabelHeight = 40
+                            $desiredLabelHeight = [Math]::Max($minLabelHeight, $measured.Height + 8)
+
+                            # Header(40) + label-top-margin(15 from 55) + label + bottom margin(20) + progress bar(20 if shown) + bottom pad(20)
+                            $progressArea = if ($syncHash.ShowProgressBar) { 50 } else { 20 }
+                            $desiredFormHeight = 55 + $desiredLabelHeight + 10 + $progressArea + 20
+
+                            if ($desiredFormHeight -ne $syncHash.Form.Height) {
+                                $syncHash.Form.SuspendLayout()
+                                try {
+                                    $syncHash.StatusLabel.Height = $desiredLabelHeight
+                                    $syncHash.Form.Height = $desiredFormHeight
+                                    if ($syncHash.ProgressBar) {
+                                        $newProgressY = 55 + $desiredLabelHeight + 10
+                                        $syncHash.ProgressBar.Location = [System.Drawing.Point]::new($syncHash.ProgressBar.Location.X, $newProgressY)
+                                    }
+                                }
+                                finally {
+                                    $syncHash.Form.ResumeLayout()
+                                }
+                            }
+                        }
+                        catch {
+                            # If measurement fails for any reason, keep current size - never crash the splash
+                        }
                     }
             
                     # Animate progress bar if exists

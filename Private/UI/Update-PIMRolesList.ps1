@@ -75,6 +75,13 @@ function Update-PIMRolesList {
     )
     
     Write-Verbose "Starting Update-PIMRolesList - Active: $RefreshActive, Eligible: $RefreshEligible"
+
+    if (-not (Get-Variable -Name 'PolicyCache' -Scope Script -ErrorAction SilentlyContinue) -or -not $script:PolicyCache) {
+        $script:PolicyCache = @{}
+    }
+    if (-not (Get-Variable -Name 'AuthenticationContextCache' -Scope Script -ErrorAction SilentlyContinue) -or -not $script:AuthenticationContextCache) {
+        $script:AuthenticationContextCache = @{}
+    }
     
     # Show operation splash if not provided (for manual refresh)
     $ownSplash = $false
@@ -99,25 +106,25 @@ function Update-PIMRolesList {
                 Write-Verbose "Using cached role data (age: $([Math]::Round($cacheAge, 1)) minutes)"
             }
             else {
-                Write-Verbose "Cache expired (age: $([Math]::Round($cacheAge, 1)) minutes), fetching fresh data"
+                Write-Verbose "Role cache expired (age: $([Math]::Round($cacheAge, 1)) minutes), fetching fresh role data"
             }
         }
         else {
-            Write-Verbose "No valid cached data available, performing fresh fetch"
+            Write-Verbose "No valid cached role data available, performing fresh role fetch"
         }
         
         # Use batch fetching based on requested refresh type when cache is invalid
         $batchResult = $null
         if (($RefreshActive -and $RefreshEligible) -and -not $useCachedData) {
-            Write-Verbose "Performing batch role and policy fetch for both active and eligible roles..."
+            Write-Verbose "Performing batch role fetch and policy resolution for both active and eligible roles..."
             
             # Update splash screen
             if ($SplashForm -and -not $SplashForm.IsDisposed) {
                 if ($ownSplash) {
-                    $SplashForm.UpdateStatus("Starting batch role and policy fetch...", 5)
+                    $SplashForm.UpdateStatus("Starting batch role fetch and policy resolution...", 5)
                 }
                 else {
-                    Update-LoadingStatus -SplashForm $SplashForm -Status "Starting batch role and policy fetch..." -Progress 5
+                    Update-LoadingStatus -SplashForm $SplashForm -Status "Starting batch role fetch and policy resolution..." -Progress 5
                 }
             }
             
@@ -159,7 +166,7 @@ function Update-PIMRolesList {
             }
             
             # Update authentication context cache (merge instead of replace)
-            if ($batchResult.AuthenticationContexts) {
+            if ($batchResult.AuthenticationContexts -and $batchResult.AuthenticationContexts.Count -gt 0) {
                 $newAuthCount = 0
                 $updatedAuthCount = 0
                 foreach ($key in $batchResult.AuthenticationContexts.Keys) {
@@ -277,7 +284,124 @@ function Update-PIMRolesList {
                         
                         # Sort active roles by type+name, then scope
                         $activeRoles = $activeRoles | Sort-Object @{Expression = {"[$($_.Type)] $($_.DisplayName)"}}, Scope
-                        
+
+                        # Apply recently-deactivated suppression (Graph/ARM propagation lag)
+                        try {
+                            if ((Get-Variable -Name 'RecentlyDeactivated' -Scope Script -ErrorAction SilentlyContinue) -and $script:RecentlyDeactivated -and $script:RecentlyDeactivated.Count -gt 0) {
+                                $nowTs = Get-Date
+                                # Prune expired suppression entries
+                                foreach ($k in @($script:RecentlyDeactivated.Keys)) {
+                                    if ($script:RecentlyDeactivated[$k] -lt $nowTs) { $null = $script:RecentlyDeactivated.Remove($k) }
+                                }
+                                if ($script:RecentlyDeactivated.Count -gt 0) {
+                                    $beforeCount = ($activeRoles | Measure-Object).Count
+                                    $activeRoles = @($activeRoles | Where-Object {
+                                        $r = $_
+                                        $rKey = $null
+                                        try {
+                                            switch ($r.Type) {
+                                                'AzureResource' {
+                                                    $rdef = $r.RoleDefinitionId
+                                                    if ($rdef -match '/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})') { $rdef = $matches[1] }
+                                                    $fs = if ($r.PSObject.Properties['FullScope']) { $r.FullScope } elseif ($r.PSObject.Properties['Scope']) { $r.Scope } else { $null }
+                                                    if ($fs -and $rdef) { $rKey = "Azure|$fs|$rdef" }
+                                                }
+                                                'Entra' {
+                                                    $rdef = $r.RoleDefinitionId
+                                                    $ds   = if ($r.PSObject.Properties['DirectoryScopeId'] -and $r.DirectoryScopeId) { $r.DirectoryScopeId } else { '/' }
+                                                    if ($rdef) { $rKey = "Entra|$rdef|$ds" }
+                                                }
+                                                'Group' {
+                                                    $gid = if ($r.PSObject.Properties['GroupId']) { $r.GroupId } else { $null }
+                                                    $aid = $null
+                                                    if ($r.PSObject.Properties['AccessId'] -and $r.AccessId) { $aid = $r.AccessId }
+                                                    elseif ($r.PSObject.Properties['MemberType'] -and $r.MemberType) { $aid = $r.MemberType.ToString().ToLower() }
+                                                    if ($gid -and $aid) { $rKey = "Group|$gid|$aid" }
+                                                }
+                                            }
+                                        } catch {}
+                                        if ($rKey -and $script:RecentlyDeactivated.ContainsKey($rKey)) {
+                                            Write-Verbose "Suppressing recently-deactivated role from active list: $rKey"
+                                            return $false
+                                        }
+                                        return $true
+                                    })
+                                    $afterCount = ($activeRoles | Measure-Object).Count
+                                    if ($beforeCount -ne $afterCount) {
+                                        Write-Verbose "Filtered $($beforeCount - $afterCount) recently-deactivated role(s) from active list"
+                                        $activeCount = $afterCount
+                                    }
+                                }
+                            }
+                        } catch { Write-Verbose "RecentlyDeactivated filter failed: $($_.Exception.Message)" }
+
+                        # Inject synthetic Active entries for recently-activated Entra/Group
+                        # roles that Graph hasn't yet surfaced (propagation lag). Azure
+                        # resource activations are injected upstream in Get-PIMRolesBatch.
+                        try {
+                            if ((Get-Variable -Name 'RecentlyActivated' -Scope Script -ErrorAction SilentlyContinue) -and $script:RecentlyActivated -and $script:RecentlyActivated.Count -gt 0) {
+                                $nowTs2 = Get-Date
+                                # Prune expired entries. Use ExpiresLocal as the canonical TTL so
+                                # the synthetic row stays visible until the real one is reported by
+                                # Graph, even when EndDateTime is close to "now" (e.g., short
+                                # activations or registrations recorded without a usable duration).
+                                foreach ($k in @($script:RecentlyActivated.Keys)) {
+                                    $entry = $script:RecentlyActivated[$k]
+                                    $expired = $false
+                                    if ($entry.PSObject.Properties['ExpiresLocal'] -and $entry.ExpiresLocal -lt $nowTs2) { $expired = $true }
+                                    if ($expired) { $null = $script:RecentlyActivated.Remove($k) }
+                                }
+                                if ($script:RecentlyActivated.Count -gt 0) {
+                                    # Build set of keys already present in activeRoles
+                                    $presentKeys2 = @{}
+                                    foreach ($r in $activeRoles) {
+                                        $pKey = $null
+                                        try {
+                                            switch ($r.Type) {
+                                                'Entra' {
+                                                    $rdef = $r.RoleDefinitionId
+                                                    $ds   = if ($r.PSObject.Properties['DirectoryScopeId'] -and $r.DirectoryScopeId) { $r.DirectoryScopeId } else { '/' }
+                                                    if ($rdef) { $pKey = "Entra|$rdef|$ds" }
+                                                }
+                                                'Group' {
+                                                    $gid = if ($r.PSObject.Properties['GroupId']) { $r.GroupId } else { $null }
+                                                    $aid = $null
+                                                    if ($r.PSObject.Properties['AccessId'] -and $r.AccessId) { $aid = $r.AccessId }
+                                                    elseif ($r.PSObject.Properties['MemberType'] -and $r.MemberType) { $aid = $r.MemberType.ToString().ToLower() }
+                                                    if ($gid -and $aid) { $pKey = "Group|$gid|$aid" }
+                                                }
+                                            }
+                                        } catch {}
+                                        if ($pKey) { $presentKeys2[$pKey] = $true }
+                                    }
+                                    $injectedList = [System.Collections.ArrayList]::new()
+                                    foreach ($entry in $activeRoles) { $null = $injectedList.Add($entry) }
+                                    $injectedCount = 0
+                                    foreach ($raKey in @($script:RecentlyActivated.Keys)) {
+                                        if ($presentKeys2.ContainsKey($raKey)) { continue }
+                                        $ra = $script:RecentlyActivated[$raKey]
+                                        if (-not $ra -or -not $ra.RoleSnapshot) { continue }
+                                        try {
+                                            $snap = $ra.RoleSnapshot
+                                            $clone = [PSCustomObject]@{}
+                                            foreach ($p in $snap.PSObject.Properties) {
+                                                $clone | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value -Force
+                                            }
+                                            $clone | Add-Member -NotePropertyName Status      -NotePropertyValue 'Active'         -Force
+                                            $clone | Add-Member -NotePropertyName EndDateTime -NotePropertyValue $ra.EndDateTime  -Force
+                                            $null = $injectedList.Add($clone)
+                                            $injectedCount++
+                                            Write-Verbose "Injected synthetic Active role from RecentlyActivated: $raKey"
+                                        } catch { Write-Verbose "Failed to inject synthetic active role for $raKey : $($_.Exception.Message)" }
+                                    }
+                                    if ($injectedCount -gt 0) {
+                                        $activeRoles = @($injectedList | Sort-Object @{Expression = {"[$($_.Type)] $($_.DisplayName)"}}, Scope)
+                                        $activeCount = ($activeRoles | Measure-Object).Count
+                                    }
+                                }
+                            }
+                        } catch { Write-Verbose "RecentlyActivated injection failed: $($_.Exception.Message)" }
+
                         $itemIndex = 0
                         # Ensure Azure override map exists to avoid lookup errors
                         if (-not (Get-Variable -Name 'AzureActiveOverrides' -Scope Script -ErrorAction SilentlyContinue)) {
@@ -295,10 +419,13 @@ function Update-PIMRolesList {
                                             if ($roleDefKey -match "/providers/Microsoft\.Authorization/roleDefinitions/([a-fA-F0-9\-]{36})") {
                                                 $roleDefKey = $matches[1]
                                             }
-                                            $key = "$($roleDefKey)|$($role.FullScope)"
+                                            # Key format must match the override store: "<FullScope>|<RoleDefGuid>"
+                                            $key = "$($role.FullScope)|$($roleDefKey)"
                                             if ($script:AzureActiveOverrides.ContainsKey($key)) {
-                                                $role | Add-Member -NotePropertyName EndDateTime -NotePropertyValue $script:AzureActiveOverrides[$key] -Force
-                                                Write-Verbose "Applied Azure active override expiration for $($role.DisplayName): $($script:AzureActiveOverrides[$key])"
+                                                $ov = $script:AzureActiveOverrides[$key]
+                                                $endValue = if ($ov -and $ov.PSObject.Properties['EndDateTime']) { $ov.EndDateTime } else { $ov }
+                                                $role | Add-Member -NotePropertyName EndDateTime -NotePropertyValue $endValue -Force
+                                                Write-Verbose "Applied Azure active override expiration for $($role.DisplayName): $endValue"
                                             }
                                         }
                                     }
@@ -364,9 +491,16 @@ function Update-PIMRolesList {
                                 # Column 4: Scope (moved from Column 3) - improve scope detection
                                 $scopeDisplay = "Directory"  # Default for Entra roles
                                 if ($role.Type -eq 'Entra') {
-                                    # For Entra roles, always show "Directory" 
-                                    # (AU information is now shown in Resource column)
-                                    $scopeDisplay = "Directory"
+                                    # AU-scoped Entra roles: keep AU name in Resource column,
+                                    # surface "Administrative Unit" in the Scope column so the
+                                    # actual scope kind is visible at a glance.
+                                    if ($role.PSObject.Properties['Scope'] -and $role.Scope -and
+                                        $role.Scope.StartsWith("AU: ")) {
+                                        $scopeDisplay = "Administrative Unit"
+                                    }
+                                    else {
+                                        $scopeDisplay = "Directory"
+                                    }
                                 }
                                 elseif ($role.Type -eq 'Group') {
                                     # For groups, show the determined scope (Directory or AU)
@@ -1077,6 +1211,11 @@ function Update-PIMRolesList {
             }
         }
         
+        if ($RefreshEligible -and $script:PolicyCache -and $script:PolicyCache.Count -gt 0) {
+            try { Save-PIMPolicyCache | Out-Null } catch { Write-Verbose "Persistent policy cache save skipped: $($_.Exception.Message)" }
+            try { Start-PIMPolicyCacheBackgroundRefresh -Form $Form -DisableParallelProcessing:$DisableParallelProcessing -ThrottleLimit $ThrottleLimit } catch { Write-Verbose "Background policy cache refresh skipped: $($_.Exception.Message)" }
+        }
+
         # Final splash screen update
         if ($SplashForm -and -not $SplashForm.IsDisposed) {
             if ($ownSplash) {

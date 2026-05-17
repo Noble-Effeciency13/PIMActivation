@@ -28,12 +28,12 @@ function Get-PIMRolePolicy {
         - RequiresApproval: Whether approval workflow is required
         - RequiresAuthenticationContext: Whether specific authentication context is required
         - AuthenticationContextId: The ID of the required authentication context
-        - AuthenticationContextDisplayName: Display name of the authentication context
-        - AuthenticationContextDescription: Description of the authentication context
-        - AuthenticationContextDetails: Full authentication context object
+        - AuthenticationContextDisplayName: Reserved for compatibility; normally null
+        - AuthenticationContextDescription: Reserved for compatibility; normally null
+        - AuthenticationContextDetails: Reserved for compatibility; normally null
     
     .NOTES
-        Uses module-level caching for both policies and authentication contexts to improve performance.
+        Uses module-level policy caching to improve performance.
         Gracefully handles API failures by returning sensible defaults.
     #>
     [CmdletBinding()]
@@ -50,17 +50,9 @@ function Get-PIMRolePolicy {
 
     $policyRoleType = if ($Role.Type -eq 'Azure') { 'AzureResource' } else { $Role.Type }
     
-    # Create cache key based on role type and ID
-    switch ($policyRoleType) {
-        'Group'       { $cacheKey = "Group_$($Role.ResourceId)" }
-        'Entra'       { $cacheKey = "Entra_$($Role.Id)" }
-        'AzureResource' {
-            $rd = if ($Role.PSObject.Properties['RoleDefinitionId'] -and $Role.RoleDefinitionId) { $Role.RoleDefinitionId }
-                  elseif ($Role.PSObject.Properties['Id'] -and $Role.Id) { $Role.Id }
-                  else { $null }
-            $cacheKey = if ($rd) { "AzureResource_$rd" } else { 'AzureResource_unknown' }
-        }
-        default       { $cacheKey = "$($Role.Type)_$($Role.Id ?? 'unknown')" }
+    $cacheKey = Get-PIMPolicyCacheKey -Role $Role
+    if ([string]::IsNullOrWhiteSpace($cacheKey)) {
+        $cacheKey = "$($Role.Type)_$($Role.Id ?? 'unknown')"
     }
     
     # Return cached result if available
@@ -83,25 +75,6 @@ function Get-PIMRolePolicy {
         AuthenticationContextDisplayName = $null
         AuthenticationContextDescription = $null
         AuthenticationContextDetails     = $null
-    }
-    
-    # Initialize authentication context cache if needed
-    if (-not $script:AuthenticationContextCache) {
-        $script:AuthenticationContextCache = @{}
-        Write-Verbose "Caching available authentication contexts..."
-        
-        try {
-            $availableContexts = Get-AuthenticationContexts
-            if ($availableContexts) {
-                foreach ($context in $availableContexts) {
-                    $script:AuthenticationContextCache[$context.Id] = $context
-                }
-                Write-Verbose "Cached $($availableContexts.Count) authentication contexts"
-            }
-        }
-        catch {
-            Write-Verbose "Authentication contexts not available: $($_.Exception.Message)"
-        }
     }
     
     try {
@@ -163,14 +136,6 @@ function Get-PIMRolePolicy {
                                             $policyInfo.RequiresAuthenticationContext = $true
                                             $contextId = $rule.AdditionalProperties.claimValue
                                             $policyInfo.AuthenticationContextId = $contextId
-                                            
-                                            # Enhance with cached context information
-                                            if ($script:AuthenticationContextCache.ContainsKey($contextId)) {
-                                                $contextInfo = $script:AuthenticationContextCache[$contextId]
-                                                $policyInfo.AuthenticationContextDisplayName = $contextInfo.DisplayName
-                                                $policyInfo.AuthenticationContextDescription = $contextInfo.Description
-                                                $policyInfo.AuthenticationContextDetails = $contextInfo
-                                            }
                                         }
                                     }
                                 }
@@ -235,14 +200,6 @@ function Get-PIMRolePolicy {
                                             $policyInfo.RequiresAuthenticationContext = $true
                                             $contextId = $rule.claimValue
                                             $policyInfo.AuthenticationContextId = $contextId
-                                            
-                                            # Enhance with cached context information
-                                            if ($script:AuthenticationContextCache.ContainsKey($contextId)) {
-                                                $contextInfo = $script:AuthenticationContextCache[$contextId]
-                                                $policyInfo.AuthenticationContextDisplayName = $contextInfo.DisplayName
-                                                $policyInfo.AuthenticationContextDescription = $contextInfo.Description
-                                                $policyInfo.AuthenticationContextDetails = $contextInfo
-                                            }
                                         }
                                     }
                                 }

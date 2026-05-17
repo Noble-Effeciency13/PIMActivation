@@ -94,7 +94,7 @@ function Get-PIMPendingRequests {
         Write-Verbose "Retrieving pending PIM group requests for user: $UserId"
         
         try {
-            $groupRequests = @(Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleRequest -Filter "principalId eq '$UserId' and status eq 'PendingProvisioning'" -ExpandProperty Group -ErrorAction SilentlyContinue)
+            $groupRequests = @(Get-MgIdentityGovernancePrivilegedAccessGroupAssignmentScheduleRequest -Filter "principalId eq '$UserId' and status eq 'PendingApproval'" -ExpandProperty Group -ErrorAction SilentlyContinue)
             
             foreach ($request in $groupRequests) {
                 if ($request.Group) {

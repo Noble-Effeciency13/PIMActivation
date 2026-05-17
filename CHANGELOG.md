@@ -8,9 +8,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned Features
-- **Profile Management**: Save and quickly activate frequently used role combinations and accounts
-- **Scheduling**: Plan role activations for future times
 - **Enhanced Reporting**: Built-in activation history and analytics
+- **Cross-Platform Experience**: Explore non-Windows UI or command-line experiences for Linux and macOS
+
+---
+
+## [2.2.0] - 2026-05-18
+
+### Added
+- **Scheduled Activations**: Activation requests can now be scheduled for a future local date/time within the selected role eligibility window.
+
+- **Activation Profiles**: Save selected role combinations to local activation profiles under `%LOCALAPPDATA%\PIMActivation\ActivationProfiles` for fast repeat activations.
+
+- **Profile Menu in Header**: Added an `Activation Profiles` button next to `Switch Account` with quick access to saved profiles and a `Save current selection` action.
+
+- **Profile Management Actions**: Saved profile rows now include edit and delete actions, and clicking a saved profile opens an activation dialog preloaded with the profile's roles and default duration.
+
+- **Save as Profile from Activation Dialog**: Users can save the current selected roles as a reusable profile directly from the activation dialog.
+
+- **Update/Delete Profile from Profile Activation**: Profile activation dialogs now support updating the saved profile or deleting it without leaving the activation flow.
+
+- **Azure Reduced Scope Picker**: Azure Resource activations can optionally use a reduced scope with guided selection from subscription to resource group to resource.
+
+- **Remembered Reduced Scope Selection**: The reduced-scope picker reuses the last chosen scope path to make repeat Azure activations faster.
+
+- **Persistent Policy Cache**: PIM policy metadata is now cached locally under `%LOCALAPPDATA%\PIMActivation\PolicyCache` using tenant-scoped folders so startup can reuse previously fetched policy requirements across accounts in the same tenant.
+
+- **Active List Group-Inherited Visibility**: The active roles list now shows each Entra ID role granted through an activated PIM group as a dedicated row labelled `Entra ID (via Group: <group display name>)`. Inherited coverage is therefore visible immediately after activation, before Microsoft Graph reflects the inherited assignments. Direct assignments still take precedence and per `(role, group, scope)` duplicates are suppressed.
+
+- **Administrative Unit Scope Column**: Administrative-Unit-scoped Entra and Group active rows now show `Administrative Unit` in the Scope column while keeping the AU name in the Resource column, so the scope kind is visible at a glance.
+
+### Enhancements
+- **Authentication Context Claim ID Display**: Authentication-context requirements now show the context claim ID in the eligible roles list, for example `Required (C2)`, without requiring optional display-name lookups.
+
+- **Reduced Auth Context API Cost**: The module now relies on policy claim IDs for auth-context display and persistence, reducing Conditional Access metadata calls and avoiding noisy access-denied lookups.
+
+- **Batched Authentication Context Handling**: Selected roles that share authentication context requirements are grouped so the user is prompted once per context where possible.
+
+- **Batch Activation Progress**: The operation splash now presents grouped batch role details so users can see exactly which roles are being activated together.
+
+- **Single Batch Activation Messaging**: Status updates across the Graph and Azure Resource activation channels keep one shared batch overview visible while activation progresses, so multi-channel activations read as one logical batch rather than several mini batches. Underlying HTTP calls still use the appropriate channel per role because Graph `$batch`, Azure Resource Manager, and authentication-context step-up tokens cannot be combined into a single request.
+
+- **Adaptive Operation Splash**: The activation splash measures the current status text on each update and grows or shrinks the form to fit, so long batch overviews and multi-line status messages are no longer clipped.
+
+- **Batch Role Logging**: Verbose logs now include the roles contained in each activation batch for easier troubleshooting.
+
+- **Background Policy Refresh**: Disk-loaded policy cache entries are treated as a fast startup hint and stale entries are refreshed in the background when possible.
+
+- **Azure Resource Policy Collection**: Azure Resource PIM policy collection now more closely follows ARM policy assignment behavior and supports richer policy parsing for Azure resource roles.
+
+- **Azure Role Collection**: Azure Resource role enumeration now better handles active, eligible, direct, inherited, and provisioned assignment states.
+
+- **Azure Scope Display**: Azure Resource scopes are shown as `Sub: <Subscription display name>`, `RG: <Resource Group display name>`, or `Resource: <name>` depending on the activated or eligible scope.
+
+- **Full Refresh Behavior**: Full Refresh now clears in-memory role/policy caches and the scoped persistent policy cache before rebuilding role and policy data.
+
+- **Activation Dialog UX**: Activation scheduling, requirements, profile actions, and reduced-scope selection are consolidated into the activation dialog for a more predictable workflow.
+
+- **Approval Request Refresh**: Approval-required activations now refresh the UI so pending approvals are reflected after submission.
+
+- **Faster Startup and Dependency Loading**: Microsoft Graph and Azure (Az.Accounts, Az.Resources) modules are now validated and loaded at module import time rather than during `Start-PIMActivation`, so the GUI opens noticeably faster, Azure Resource role support is ready immediately without a mid-launch module-install pause, and import-time errors surface clearly before the activation workflow starts.
+
+- **Top Control Layout**: The role-type toggles and primary activation controls were realigned for a cleaner bottom control panel.
+
+### Fixed
+- **Azure Resource Eligible Role Discovery**: Fixed the Azure Resource PIM catch-22 where eligible roles could require an existing Azure role before they could be listed. Eligible role discovery now uses the ARM `asTarget()` filter so users can enumerate their own Azure Resource PIM eligibility before activation.
+
+- **Group Activation `accessId`**: Group activation and deactivation now preserve the Graph `accessId` (`member` or `owner`) from the eligible assignment data. Hardcoding `member` previously caused `RoleAssignmentDoesNotExist` errors for owner-eligible PIM group roles.
+
+### Security
+- **Sanitized Policy Persistence**: The persistent cache stores only policy requirement metadata and authentication-context claim IDs. Tokens, activation payloads, justifications, ticket values, display-name lookups, and secrets are not persisted.
 
 ---
 
@@ -334,14 +401,14 @@ All v1.2.x performance optimizations maintained and extended to Azure resources:
 
 #### Technical Features
 - Direct REST API calls for authentication context preservation
-- Automatic module dependency management
+- Import-time module dependency validation and loading
 - Comprehensive error handling and user feedback
 - Full PowerShell 7+ compatibility with modern language features
 
 #### Requirements
 - Windows Operating System (Windows 10/11 or Windows Server 2016+)
 - PowerShell 7+
-- Microsoft Graph PowerShell modules (auto-installed if missing)
+- Microsoft Graph PowerShell modules available at module import time
 - Appropriate Entra ID permissions for PIM role management
 
 #### Known Limitations
@@ -353,11 +420,33 @@ All v1.2.x performance optimizations maintained and extended to Azure resources:
 
 ## Version History
 
+- **v2.2.0** (2026-05-16): Scheduled activations, activation profiles, Azure reduced scope, tenant-scoped policy cache, auth-context claim ID display/batching, and clearer batch activation visibility
+- **v2.1.0** (2026-01-27): Azure resource display, de-duplication, temporary activation visibility, and activation/deactivation safety
+- **v2.0.0** (2025-12-29): Azure Resource role support, parallel processing, and modular architecture
+- **v1.2.6** (2025-11-27): Custom app registration support
+- **v1.2.5** (2025-08-13): Large policy-set reliability and performance fixes
+- **v1.2.4** (2025-08-04): Minimum-version dependency compatibility
+- **v1.2.3** (2025-08-04): Dependency auto-install and quiet import fixes
+- **v1.2.1** (2025-08-04): Automatic dependency resolution and cleaner startup
+- **v1.2.0** (2025-07-31): Batch role fetching, batch policy processing, and advanced duplicate handling
+- **v1.1.1** (2025-07-30): Just-in-time module loading and version compatibility improvements
+- **v1.1.0** (2025-07-30): WAM authentication and MSAL.PS removal
 - **v1.0.1** (2025-07-29): Bug fixes for authentication context and MSAL.PS reliability
 - **v1.0.0** (2025-07-28): Initial release with core PIM activation functionality
 
 ---
 
-[Unreleased]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.2.6...v2.0.0
+[1.2.6]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.2.5...v1.2.6
+[1.2.5]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.2.4...v1.2.5
+[1.2.4]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.2.3...v1.2.4
+[1.2.3]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.2.1...v1.2.3
+[1.2.1]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/Noble-Effeciency13/PIMActivation/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Noble-Effeciency13/PIMActivation/releases/tag/v1.0.0

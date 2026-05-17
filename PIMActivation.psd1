@@ -3,7 +3,7 @@
     RootModule           = 'PIMActivation.psm1'
     
     # Version number of this module.
-    ModuleVersion        = '2.1.0'
+    ModuleVersion        = '2.2.0'
     
     # Supported PSEditions - Requires PowerShell Core (7+)
     CompatiblePSEditions = @('Core')
@@ -21,7 +21,7 @@
     Copyright            = '(c) 2025 Sebastian Flæng Markdanner. All rights reserved.'
 
     # Description of the functionality provided by this module
-    Description          = 'PowerShell module for managing Microsoft Entra ID Privileged Identity Management (PIM) role activations through a modern GUI interface. Supports Entra ID roles, PIM-enabled groups, and Azure Resource roles. Features authentication context, bulk operations, and policy compliance. Developed with AI assistance. Requires PowerShell 7+.'
+    Description          = 'PowerShell module for managing Microsoft Entra ID Privileged Identity Management (PIM) role activations through a modern GUI interface. Supports Entra ID roles, PIM-enabled groups, Azure Resource roles, scheduled activations, activation profiles, Azure reduced scope, authentication-context batching, bulk operations, persistent policy metadata caching, and policy compliance. Developed with AI assistance. Requires PowerShell 7+.'
     
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion    = '7.0'
@@ -29,8 +29,8 @@
     # Script to run after the module is imported
     ScriptsToProcess     = @()
     
-    # Required modules - conditionally enforced based on availability
-    # Auto-installation logic in PSM1 handles missing modules
+    # Required modules are validated and imported by PIMActivation.psm1 to support
+    # faster startup and local development scenarios.
     RequiredModules      = @()
     
     # Functions to export from this module
@@ -51,7 +51,7 @@
     PrivateData          = @{
         PSData = @{
             # Tags applied to this module for online gallery discoverability
-            Tags                     = @('PIM', 'PrivilegedIdentityManagement', 'EntraID', 'AzureAD', 'Azure', 'AzureResources', 'Identity', 'Governance', 'RBAC', 'GUI', 'Authentication', 'ConditionalAccess', 'Security', 'Microsoft', 'Graph')
+            Tags                     = @('PIM', 'PrivilegedIdentityManagement', 'EntraID', 'AzureAD', 'Azure', 'AzureResources', 'Identity', 'Governance', 'RBAC', 'GUI', 'Authentication', 'ConditionalAccess', 'Security', 'Microsoft', 'Graph', 'ScheduledActivations', 'ActivationProfiles', 'PolicyCache')
             
             # A URL to the license for this module.
             LicenseUri               = 'https://github.com/Noble-Effeciency13/PIMActivation/blob/main/LICENSE'
@@ -62,24 +62,34 @@
             # A URL to an icon representing this module.
             IconUri                  = 'https://raw.githubusercontent.com/Noble-Effeciency13/PIMActivation/main/Resources/icon.png'
             
-                        # ReleaseNotes
-                        ReleaseNotes             = @'
-## PIMActivation v2.1.0 - Patch & Enhancements
+            # ReleaseNotes
+            ReleaseNotes             = @'
+## PIMActivation v2.2.0 - Scheduling, Activation Profiles, Reduced Scope, and Policy Cache
 
-### ✅ Enhancements
-- Management group display names: management-group scopes are now shown with their friendly display name (or `/` for tenant root) instead of raw MG IDs.
-- Inherited eligible role suppression: subscription-scoped inherited eligible roles are suppressed when the same role is available at the management-group level to avoid duplicate activation entries.
-- Temporary activation detection: initial tenant-root and management-group active assignments are enriched with PIM activation schedule Start/End windows so temporarily activated roles show expiry rather than appearing permanently active.
-- Role definition normalization: role definition identifiers are normalized (GUID) during deduplication to eliminate duplicates caused by full-path vs GUID variants.
-- Import-time PSGallery notification: on import the module performs a best-effort check against the PowerShell Gallery and warns when a newer release is available. The notification follows Microsoft module style and provides Update-Module / Install-Module examples. This check can be suppressed via `$script:SuppressUpdateNotification`.
+## What's included
 
-### 🛠️ Fixes (Community Contribution)
-- Activation/Deactivation Scope and Safety: Added explicit `Scope` support when activating and deactivating Azure PIM roles and improved error handling to prevent attempting to deactivate a role that was activated less than the required 5-minute window. (Thanks to Lukas Gosling (@l-gosling) for this contribution.)
+• Activation Profiles: save frequently used role selections as named local profiles under %LOCALAPPDATA%\PIMActivation\ActivationProfiles. A new Activation Profiles button in the header gives quick access to saved profiles. Any current role selection can be saved from the activation dialog, and profiles support one-click launch with pre-filled roles and duration. Profiles can be updated or deleted within the activation flow.
+• Scheduled Activations: choose a future local date/time for regular and profile-based activation requests within the selected role eligibility window. The chosen time is honoured across Entra ID, Azure Resource, and authentication-context flows.
+• Azure Reduced Scope: Azure Resource role activations can optionally target a narrower effective scope using a guided picker through subscription, resource group, and resource. The last-used scope path is remembered for repeat activations.
+• Persistent Policy Cache: PIM policy metadata is cached under %LOCALAPPDATA%\PIMActivation\PolicyCache in tenant-scoped folders, reducing API calls at startup. Stale entries are revalidated in the background to keep policy data current.
+• Azure Scope Display: Azure Resource scopes in the eligible and active role lists now show as Sub: <subscription>, RG: <resource group>, or Resource: <name> (and MG: <name> or Tenant Root for higher-level scopes) so the effective scope is readable without inspecting the raw ARM path.
+• Administrative Unit Scope Column: Entra ID and Group role assignments scoped to an Administrative Unit now show Administrative Unit in the Scope column with the AU name in the Resource column, making the scope kind visible at a glance.
+• Authentication Context Claim ID Display: authentication-context requirements show as their claim ID, for example Required (C2), removing the need for Conditional Access display-name lookups at startup and avoiding access-denied noise in restricted environments.
+• Activation Progress Visibility: the activation splash shows a grouped batch overview shared across Entra ID (Graph) and Azure Resource (ARM) channels so a multi-role activation reads as a single logical operation rather than separate mini-batches.
+• Adaptive Operation Splash: the operation splash auto-resizes on each status update to fit the current message. Long batch overviews and multi-line messages are no longer clipped.
+• Approval-Required Activation Refresh: the eligible roles list refreshes after submission of an approval-required activation so the Pending Approval column reflects the newly submitted request without a manual refresh.
+• Full Refresh Behavior: Full Refresh clears both in-memory role/policy data and the on-disk persistent policy cache before rebuilding, ensuring fresh policy requirements from source.
+• Faster Startup and Dependency Loading: Microsoft Graph and Azure (Az.Accounts, Az.Resources) modules are now validated and loaded at module import time rather than during Start-PIMActivation. The GUI opens noticeably faster, Azure Resource role support is ready immediately without the previous mid-launch module-install pause, and import-time errors surface clearly before the activation workflow starts.
+• Azure Resource Role and Policy Collection: Azure Resource role enumeration and ARM policy parsing now more accurately reflect active, eligible, direct, inherited, and provisioned assignment states, so the eligible and active lists better match what the Azure portal shows.
 
-### ⚡ Notes
-- These changes are additive and preserve existing public APIs. They improve display fidelity and de-duplication for Azure resource roles and make temporary activations visible as such in the UI.
+## Fixes
 
-PowerShell module for comprehensive PIM role management across Entra ID, Groups, and Azure Resources with parallel processing engine and modern GUI.
+• Azure Resource Eligible Role Discovery: resolved a catch-22 where listing Azure Resource PIM eligibility could fail because eligibility enumeration appeared to require an existing Azure role. Eligible role discovery now uses the ARM asTarget() filter so users can enumerate their own Azure Resource PIM eligibility from a clean state without any pre-existing Azure role assignment.
+
+## Notes
+
+• Local files under %LOCALAPPDATA%\PIMActivation\ store metadata only. Tokens, refresh tokens, authentication-context tokens, activation request bodies, scheduled start times, justifications, ticket values, and secrets are not persisted.
+• Multi-channel activations still use the appropriate channel per role (Graph, Azure Resource Manager, authentication-context step-up); the unified batch overview reflects the logical operation without merging the underlying HTTP calls.
 '@
             # Flag to indicate whether the module requires explicit user acceptance
             RequireLicenseAcceptance = $false

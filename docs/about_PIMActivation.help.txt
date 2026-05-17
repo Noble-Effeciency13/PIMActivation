@@ -23,6 +23,9 @@ LONG DESCRIPTION
     - Complete Azure Resource roles support (subscriptions, resource groups, resources)
     - Cross-subscription Azure role enumeration with silent SSO
     - Multi-select capability for bulk activations
+    - Scheduled activations using a future local date/time within role eligibility windows
+    - Activation profiles for saving and launching reusable role selections
+    - Azure Resource reduced-scope selection for subscription, resource group, or resource activation
     - Configurable activation duration (30 minutes to 24 hours)
     - Group-role relationship visibility and attribution
     - Automatic handling of policy requirements:
@@ -32,7 +35,14 @@ LONG DESCRIPTION
       * Authentication context
       * Approval workflows
     - Real-time view of active and eligible roles
+    - Inherited-role visibility: roles granted by an activated PIM group
+      appear as `Entra ID (via Group: <name>)` rows in the active list
+    - Administrative-unit scope shown as `Administrative Unit` in the
+      Scope column, with the AU name preserved in the Resource column
+    - Azure Resource scopes shown as `Sub: <name>`, `RG: <name>`, or
+      `Resource: <name>` depending on the activated scope
     - Account switching without restarting
+    - Persistent tenant-scoped policy metadata cache
     - Enhanced cache management with proper invalidation
     - Thread-safe parallel operations with configurable throttling
 
@@ -61,11 +71,17 @@ EXAMPLES
     # Use custom app registration for delegated authentication
     Start-PIMActivation -ClientId "<appId>" -TenantId "<tenantId>"
 
+    # Schedule an activation from the GUI
+    # 1. Select eligible roles
+    # 2. Click Activate Roles
+    # 3. Enable Schedule for later
+    # 4. Choose the desired local date/time and submit
+
 REQUIREMENTS
     - PowerShell 7+ (required for parallel processing engine)
     - Windows operating system (Windows 10/11 recommended for optimal performance)
-    - Microsoft.Graph PowerShell modules (auto-installed)
-    - Az.Accounts 5.1.0+ and Az.Resources 6.0.0+ (auto-installed for Azure resources)
+    - Microsoft.Graph PowerShell modules (validated and loaded when PIMActivation is imported)
+    - Az.Accounts 5.1.0+ and Az.Resources 6.0.0+ (validated and loaded when PIMActivation is imported)
     - Appropriate permissions in Entra ID:
       * RoleEligibilitySchedule.ReadWrite.Directory
       * RoleAssignmentSchedule.ReadWrite.Directory
@@ -98,7 +114,7 @@ TROUBLESHOOTING
        - Check verbose output: Start-PIMActivation -Verbose
 
     4. "Azure roles not loading"
-       - Az.Accounts and Az.Resources modules are auto-installed
+    - Ensure Az.Accounts and Az.Resources are installed and discoverable
        - Verify Azure subscription access
        - Check Azure RBAC permissions
 
@@ -117,6 +133,8 @@ KEYWORDS
     Identity Governance
     Parallel Processing
     Azure Resources
+    Scheduled Activations
+    Activation Profiles
     Bulk Activation
     Performance
 

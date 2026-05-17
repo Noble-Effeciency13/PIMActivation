@@ -15,6 +15,10 @@ function Invoke-PIMActivationWithAuthContextToken {
         
     .PARAMETER AuthContextToken
         The authentication context token to use for the activation.
+
+    .NOTES
+        The activation start time is taken from ActivationParams.scheduleInfo.startDateTime so
+        scheduled activations preserve the user-selected start across auth-context flows.
     #>
     [CmdletBinding()]
     param(
@@ -44,7 +48,7 @@ function Invoke-PIMActivationWithAuthContextToken {
             PrincipalId   = $ActivationParams.principalId
             Justification = $ActivationParams.justification
             ScheduleInfo  = @{
-                StartDateTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
+                StartDateTime = $ActivationParams.scheduleInfo.startDateTime
                 Expiration    = @{
                     Type     = "AfterDuration"
                     Duration = $ActivationParams.scheduleInfo.expiration.duration

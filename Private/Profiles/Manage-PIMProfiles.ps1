@@ -1,30 +1,32 @@
 function Manage-PIMProfiles {
     <#
     .SYNOPSIS
-        [PLANNED FEATURE] Central profiles management logic.
-    
-    .DESCRIPTION
-        This feature is planned for a future release and is not currently implemented.
-        When implemented, it will provide centralized management for PIM activation profiles,
-        including saving, retrieving, and deleting profiles.
-    
-    .EXAMPLE
-        Manage-PIMProfiles
-        Will manage PIM activation profiles when this feature is implemented.
-    
-    .OUTPUTS
-        System.String
-        Currently returns $null. Will return the last used UPN when implemented.
-    
-    .NOTES
-        Status: Not Implemented
-        Planned Version: 3.0.0
+        Performs simple activation profile management actions.
     #>
     [CmdletBinding()]
-    param()
-    
-    Write-Warning "Profile management is not yet implemented. This feature is planned for version 3.0.0."
-    Write-Verbose "Manage-PIMProfiles placeholder called - returning null"
-    
-    return $null
+    param(
+        [ValidateSet('Get', 'Delete')]
+        [string]$Action = 'Get',
+
+        [string]$ProfileName
+    )
+
+    switch ($Action) {
+        'Get' {
+            return Get-PIMActivationProfiles
+        }
+        'Delete' {
+            if ([string]::IsNullOrWhiteSpace($ProfileName)) {
+                throw 'ProfileName is required when deleting an activation profile.'
+            }
+
+            $profile = Get-PIMActivationProfiles | Where-Object { $_.Name -eq $ProfileName } | Select-Object -First 1
+            if (-not $profile -or -not $profile.PSObject.Properties['FilePath'] -or -not (Test-Path -Path $profile.FilePath)) {
+                return $false
+            }
+
+            Remove-Item -Path $profile.FilePath -Force
+            return $true
+        }
+    }
 }

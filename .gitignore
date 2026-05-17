@@ -1,0 +1,14 @@
+# ── OS cruft (cross-OS contributor hygiene) ─────────────────────────────────
+Thumbs.db
+.DS_Store
+
+# ── Secrets backstop (defense-in-depth — never commit these) ────────────────
+.env
+.env.*
+*.PSCredential
+*.clixml
+*.pfx
+*.cer
+*.key
+*.pem
+secrets.json
